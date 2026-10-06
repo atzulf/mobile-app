@@ -48,6 +48,39 @@ export default function DashboardScreen() {
   const expense = transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
   const balance = income - expense;
 
+  const getPeriodDescription = () => {
+    const now = new Date();
+    if (period === 'all') return 'Semua waktu';
+    if (period === 'today') {
+      return now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+    if (period === 'week') {
+      const start = new Date(now);
+      const day = (now.getDay() + 6) % 7; // Monday = 0
+      start.setDate(now.getDate() - day);
+      
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      
+      const startMonth = start.getMonth();
+      const endMonth = end.getMonth();
+      const startYear = start.getFullYear();
+      const endYear = end.getFullYear();
+
+      if (startYear !== endYear) {
+        return `${start.getDate()} ${start.toLocaleDateString('id-ID', {month:'short'})} ${startYear} - ${end.getDate()} ${end.toLocaleDateString('id-ID', {month:'short'})} ${endYear}`;
+      }
+      if (startMonth !== endMonth) {
+        return `${start.getDate()} ${start.toLocaleDateString('id-ID', {month:'short'})} - ${end.getDate()} ${end.toLocaleDateString('id-ID', {month:'long'})} ${startYear}`;
+      }
+      return `${start.getDate()}-${end.getDate()} ${end.toLocaleDateString('id-ID', {month:'long', year:'numeric'})}`;
+    }
+    if (period === 'month') {
+      return now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    }
+    return '';
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -60,7 +93,12 @@ export default function DashboardScreen() {
           <Text style={styles.appName}>P Ingfo !!</Text>
 
           <View style={styles.balanceCard}>
-            <Text style={styles.balanceLabel}>Saldo {PERIODS.find((p) => p.key === period)?.label.toLowerCase()}</Text>
+            <Text style={styles.balanceLabel}>
+              Saldo {PERIODS.find((p) => p.key === period)?.label.toLowerCase()}
+            </Text>
+            <Text style={styles.dateDescription}>
+              {getPeriodDescription()}
+            </Text>
             <Text style={styles.balanceValue}>{formatRupiah(balance)}</Text>
 
             <View style={styles.summaryRow}>
@@ -143,8 +181,9 @@ const styles = StyleSheet.create({
     marginBottom: -96,
     ...shadow,
   },
-  balanceLabel: { color: colors.muted, fontSize: 13, fontWeight: '500' },
-  balanceValue: { color: colors.text, fontSize: 30, fontWeight: '800', marginTop: spacing.xs },
+  balanceLabel: { color: colors.inkSecondary, fontSize: 13, fontWeight: '500' },
+  dateDescription: { color: colors.inkTertiary, fontSize: 11, marginTop: 2 },
+  balanceValue: { color: colors.ink, fontSize: 30, fontWeight: '800', marginTop: spacing.xs },
   summaryRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.xl },
   summaryItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   summaryIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
