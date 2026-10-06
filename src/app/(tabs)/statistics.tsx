@@ -21,6 +21,8 @@ export default function StatisticsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [focusedPie, setFocusedPie] = useState<{name: string, value: number, percentage: number} | null>(null);
+
   const [dashboard, setDashboard] = useState<DashboardStats>({ income: 0, expense: 0, balance: 0 });
   const [categories, setCategories] = useState<CategoryStats[]>([]);
   const [trend, setTrend] = useState<TrendStats[]>([]);
@@ -61,8 +63,8 @@ export default function StatisticsScreen() {
 
   // 16.1 Bar Chart Data
   const barData = [
-    { value: dashboard.income, label: 'Pemasukan', frontColor: colors.income, topLabelComponent: () => <Text style={{fontSize: 10, color: colors.income, marginBottom: 4}}>{formatThousands(dashboard.income)}</Text> },
-    { value: dashboard.expense, label: 'Pengeluaran', frontColor: colors.expense, topLabelComponent: () => <Text style={{fontSize: 10, color: colors.expense, marginBottom: 4}}>{formatThousands(dashboard.expense)}</Text> },
+    { value: dashboard.income, label: 'Pemasukan', frontColor: colors.income, topLabelComponent: () => <Text style={{fontSize: 10, color: colors.income, marginBottom: 4}}>{formatThousands(String(dashboard.income))}</Text> },
+    { value: dashboard.expense, label: 'Pengeluaran', frontColor: colors.expense, topLabelComponent: () => <Text style={{fontSize: 10, color: colors.expense, marginBottom: 4}}>{formatThousands(String(dashboard.expense))}</Text> },
   ];
   const maxBarValue = Math.max(dashboard.income, dashboard.expense);
 
@@ -75,7 +77,8 @@ export default function StatisticsScreen() {
       color: PIE_COLORS[i % PIE_COLORS.length],
       text: percentage > 5 ? `${percentage}%` : '',
       textColor: colors.white,
-      name: c.name
+      name: c.name,
+      onPress: () => setFocusedPie({ name: c.name, value: c.total, percentage })
     };
   });
 
@@ -129,7 +132,27 @@ export default function StatisticsScreen() {
                   yAxisTextStyle={{ color: colors.muted, fontSize: 10 }}
                   yAxisLabelWidth={65}
                   maxValue={maxBarValue > 0 ? maxBarValue * 1.2 : 100}
-                  formatYLabel={(label) => formatThousands(Number(label))}
+                  formatYLabel={(label) => formatThousands(label)}
+                  pointerConfig={{
+                    pointerStripHeight: 160,
+                    pointerStripColor: colors.border,
+                    pointerStripWidth: 2,
+                    pointerColor: colors.primary,
+                    radius: 4,
+                    pointerLabelWidth: 100,
+                    pointerLabelHeight: 40,
+                    autoAdjustPointerLabelPosition: true,
+                    pointerLabelComponent: (items: any) => {
+                      const item = items[0];
+                      if (!item) return null;
+                      return (
+                        <View style={styles.tooltipBox}>
+                          <Text style={styles.tooltipLabel}>{item.label}</Text>
+                          <Text style={styles.tooltipValue}>{formatThousands(String(item.value))}</Text>
+                        </View>
+                      );
+                    },
+                  }}
                 />
               </View>
               <View style={styles.legendRow}>
@@ -150,12 +173,23 @@ export default function StatisticsScreen() {
                     radius={100}
                     textSize={12}
                     showText
-                    centerLabelComponent={() => (
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 10, color: colors.muted }}>Total</Text>
-                        <Text style={{ fontSize: 14, fontWeight: 'bold' }}>{formatRupiah(totalExpense)}</Text>
-                      </View>
-                    )}
+                    focusOnPress
+                    centerLabelComponent={() => {
+                      if (focusedPie) {
+                        return (
+                          <View style={{ alignItems: 'center', padding: 4 }}>
+                            <Text style={{ fontSize: 10, color: colors.muted, textAlign: 'center' }} numberOfLines={1}>{focusedPie.name}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{focusedPie.percentage}%</Text>
+                          </View>
+                        );
+                      }
+                      return (
+                        <View style={{ alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10, color: colors.muted }}>Total</Text>
+                          <Text style={{ fontSize: 13, fontWeight: 'bold' }}>{formatThousands(String(totalExpense))}</Text>
+                        </View>
+                      );
+                    }}
                   />
                 </View>
                 
@@ -200,7 +234,34 @@ export default function StatisticsScreen() {
                   yAxisTextStyle={{ color: colors.muted, fontSize: 10 }}
                   yAxisLabelWidth={65}
                   maxValue={lineYAxisMax}
-                  formatYLabel={(label) => formatThousands(Number(label))}
+                  formatYLabel={(label) => formatThousands(label)}
+                  pointerConfig={{
+                    pointerStripHeight: 160,
+                    pointerStripColor: colors.border,
+                    pointerStripWidth: 2,
+                    pointerColor: colors.primary,
+                    radius: 4,
+                    pointerLabelWidth: 120,
+                    pointerLabelHeight: 60,
+                    autoAdjustPointerLabelPosition: true,
+                    pointerLabelComponent: (items: any) => {
+                      const income = items[0]?.value || 0;
+                      const expense = items[1]?.value || 0;
+                      return (
+                        <View style={styles.tooltipBox}>
+                          <Text style={styles.tooltipLabel}>Tgl {items[0]?.label || ''}</Text>
+                          <View style={styles.tooltipRow}>
+                            <View style={[styles.legendDot, {backgroundColor: colors.income}]}/>
+                            <Text style={styles.tooltipValue}>{formatThousands(String(income))}</Text>
+                          </View>
+                          <View style={styles.tooltipRow}>
+                            <View style={[styles.legendDot, {backgroundColor: colors.expense}]}/>
+                            <Text style={styles.tooltipValue}>{formatThousands(String(expense))}</Text>
+                          </View>
+                        </View>
+                      );
+                    },
+                  }}
                 />
               </ScrollView>
               <View style={styles.legendRow}>
@@ -234,4 +295,8 @@ const styles = StyleSheet.create({
   legendText: { fontSize: 12, color: colors.muted },
   pieLegendGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.md },
   pieLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 6, width: '45%' },
+  tooltipBox: { backgroundColor: colors.text, padding: spacing.sm, borderRadius: radius.sm },
+  tooltipLabel: { color: colors.white, fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  tooltipRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  tooltipValue: { color: colors.white, fontSize: 11, fontWeight: '600' },
 });
