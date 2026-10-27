@@ -29,7 +29,10 @@ export function TransactionItem({ item, onPress }: Props) {
       </View>
       <View style={styles.middle}>
         <Text style={styles.title} numberOfLines={1}>{name}</Text>
-        <Text style={styles.subtitle} numberOfLines={1}>{categoryName}</Text>
+        <View style={styles.walletTagRow}>
+          <Ionicons name="wallet-outline" size={11} color={colors.inkSecondary} />
+          <Text style={styles.subtitle} numberOfLines={1}>Dompet {categoryName}</Text>
+        </View>
       </View>
       <View style={styles.right}>
         <Text style={[styles.amount, { color: isIncome ? colors.income : colors.ink }]}>
@@ -63,6 +66,11 @@ const styles = StyleSheet.create({
   },
   middle: { flex: 1 },
   title: { fontSize: 15, fontWeight: '600', color: colors.ink, marginBottom: 2 },
+  walletTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   subtitle: { fontSize: 13, fontWeight: '500', color: colors.inkSecondary },
   right: { alignItems: 'flex-end', marginLeft: spacing.sm },
   amount: { fontSize: 15, fontWeight: '700' },
