@@ -23,6 +23,15 @@ export default function RootLayout() {
             headerStyle: { backgroundColor: colors.background },
           }}
         />
+        <Stack.Screen
+          name="category-detail"
+          options={{
+            title: 'Dompet Kecil',
+            headerTitleStyle: { fontWeight: '700' },
+            headerShadowVisible: false,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
       </Stack>
     </>
   );
