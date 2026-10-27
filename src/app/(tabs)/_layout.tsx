@@ -5,10 +5,13 @@ import { colors } from '../../theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
-const tabIcon = (focused: IconName, outline: IconName) =>
-  ({ color, focused: isFocused }: { color: ColorValue; focused: boolean }) => (
+const tabIcon = (focused: IconName, outline: IconName) => {
+  const IconComponent = ({ color, focused: isFocused }: { color: ColorValue; focused: boolean }) => (
     <Ionicons name={isFocused ? focused : outline} size={22} color={color as string} />
   );
+  IconComponent.displayName = 'TabIcon';
+  return IconComponent;
+};
 
 export default function TabLayout() {
   return (
@@ -27,7 +30,7 @@ export default function TabLayout() {
       <Tabs.Screen name="index" options={{ title: 'Beranda', headerShown: false, tabBarIcon: tabIcon('home', 'home-outline') }} />
       <Tabs.Screen name="transactions" options={{ title: 'Transaksi', tabBarIcon: tabIcon('list', 'list-outline') }} />
       <Tabs.Screen name="statistics" options={{ title: 'Statistik', tabBarIcon: tabIcon('pie-chart', 'pie-chart-outline') }} />
-      <Tabs.Screen name="budget" options={{ title: 'Budget', tabBarIcon: tabIcon('wallet', 'wallet-outline') }} />
+      <Tabs.Screen name="budget" options={{ title: 'Dompet', tabBarIcon: tabIcon('wallet', 'wallet-outline') }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: tabIcon('settings', 'settings-outline') }} />
     </Tabs>
   );
