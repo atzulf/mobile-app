@@ -8,7 +8,7 @@ import { Category, CategoryService, CategoryType } from '../../services/category
 import { TransactionItem } from '../../components/transaction-item';
 import { Chip, EmptyState, ErrorState, Fab, Loading } from '../../components/ui/common';
 import { colors, radius, shadow, spacing } from '../../theme';
-import { formatDateLong, formatMonth, formatRupiah, getErrorMessage, getMonthRange, toYMD } from '../../utils/format';
+import { formatDateLong, formatRupiah, getErrorMessage, getMonthRange, toYMD } from '../../utils/format';
 
 type TypeFilter = 'ALL' | CategoryType;
 
@@ -47,7 +47,7 @@ export default function TransactionsScreen() {
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
-  const visibleCategories = categories.filter((c) => typeFilter === 'ALL' || c.type === typeFilter);
+  const visibleCategories = categories;
 
   // Group by day for SectionList
   const sections = useMemo(() => {
@@ -132,11 +132,6 @@ export default function TransactionsScreen() {
   const income = transactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
 
-  const shiftMonth = (delta: number) => {
-    setLoading(true);
-    setMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
-  };
-
   const changeType = (t: TypeFilter) => {
     setLoading(true);
     setTypeFilter(t);
@@ -209,13 +204,43 @@ export default function TransactionsScreen() {
         <Chip label="Pengeluaran" active={typeFilter === 'EXPENSE'} color={colors.expense} onPress={() => changeType('EXPENSE')} />
       </ScrollView>
 
-      {/* Category filter */}
+      {/* Dompet filter */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        <Chip label="Semua Kategori" active={!categoryId} onPress={() => { setLoading(true); setCategoryId(undefined); }} />
+        <Chip label="Semua Dompet" active={!categoryId} onPress={() => { setLoading(true); setCategoryId(undefined); }} />
         {visibleCategories.map((c) => (
-          <Chip key={c.id} label={c.name} active={categoryId === c.id} onPress={() => { setLoading(true); setCategoryId(c.id); }} />
+          <Chip key={c.id} label={`Dompet ${c.name}`} active={categoryId === c.id} onPress={() => { setLoading(true); setCategoryId(c.id); }} />
         ))}
       </ScrollView>
+
+      {categoryId ? (
+        <View style={styles.activeCategoryBar}>
+          <Text style={styles.activeCategoryText} numberOfLines={1}>
+            Dompet: {categories.find((c) => c.id === categoryId)?.name}
+          </Text>
+          <Pressable
+            onPress={() => {
+              const cat = categories.find((c) => c.id === categoryId);
+              if (cat) {
+                router.push({
+                  pathname: '/category-detail',
+                  params: {
+                    categoryId: cat.id,
+                    categoryName: cat.name,
+                    month: String(month.getMonth() + 1),
+                    year: String(month.getFullYear()),
+                  },
+                });
+              }
+            }}
+            style={styles.openCategoryBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Buka dompet kategori"
+          >
+            <Text style={styles.openCategoryBtnText}>Buka Dompet</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -271,6 +296,36 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 13, fontWeight: '500', color: colors.inkSecondary },
   totalValue: { fontSize: 18, fontWeight: '700', marginTop: 4 },
   chipRow: { paddingTop: spacing.md },
+  activeCategoryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.control,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  activeCategoryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.ink,
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  openCategoryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  openCategoryBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xxl, marginBottom: spacing.sm },
   sectionTitle: { fontSize: 13, fontWeight: '500', color: colors.inkSecondary },
   sectionTotal: { fontSize: 13, fontWeight: '600' },
