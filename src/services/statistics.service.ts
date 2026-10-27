@@ -24,8 +24,8 @@ export const StatisticsService = {
     const res = await api.get<DashboardStats>('/statistics/dashboard', { params: { month, year } });
     return res.data;
   },
-  getCategories: async (month?: number, year?: number) => {
-    const res = await api.get<CategoryStats[]>('/statistics/categories', { params: { month, year } });
+  getCategories: async (month?: number, year?: number, type: 'INCOME' | 'EXPENSE' = 'EXPENSE') => {
+    const res = await api.get<CategoryStats[]>('/statistics/categories', { params: { month, year, type } });
     return res.data;
   },
   getTrend: async (year?: number, month?: number) => {
