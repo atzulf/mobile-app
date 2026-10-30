@@ -25,7 +25,7 @@ export function TransactionItem({ item, onPress }: Props) {
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <View style={[styles.iconWrap, { backgroundColor: soft }]}>
-        <Ionicons name={getCategoryIcon(item.category?.name)} size={20} color={tint} />
+        <Ionicons name={getCategoryIcon(item.category?.name, item.category?.icon)} size={20} color={tint} />
       </View>
       <View style={styles.middle}>
         <Text style={styles.title} numberOfLines={1}>{name}</Text>
