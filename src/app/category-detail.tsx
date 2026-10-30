@@ -19,6 +19,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Category, CategoryService } from '../services/category.service';
 import { Transaction, TransactionService } from '../services/transaction.service';
 import { Budget, BudgetService } from '../services/budget.service';
+import { NotificationService } from '../services/notification.service';
 import { colors, getCategoryIcon, radius, shadow, spacing } from '../theme';
 import {
   confirmAction,
@@ -58,6 +59,7 @@ export default function CategoryDetailScreen() {
   const [category, setCategory] = useState<Category | null>(null);
   const [budget, setBudget] = useState<Budget | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [allCategoryTransactions, setAllCategoryTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,18 +98,27 @@ export default function CategoryDetailScreen() {
       const y = date.getFullYear();
 
       // Fetch all required data concurrently
-      const [allCats, monthTxs, monthBudgets] = await Promise.all([
+      const [allCats, allTxs, monthBudgets] = await Promise.all([
         CategoryService.getAll().catch(() => [] as Category[]),
-        TransactionService.getAll(getMonthRange(date)).catch(() => [] as Transaction[]),
+        TransactionService.getAll().catch(() => [] as Transaction[]),
         BudgetService.getAll(m, y).catch(() => [] as Budget[]),
       ]);
 
       const foundCat = allCats.find((c) => c.id === categoryId) || null;
       setCategory(foundCat);
 
-      // Filter transactions belonging to this category in memory for 100% precision
-      const catTxs = monthTxs.filter((t) => t.categoryId === categoryId);
-      setTransactions(catTxs);
+      // Filter all-time transactions for this category
+      const catAllTxs = allTxs.filter((t) => t.categoryId === categoryId);
+      setAllCategoryTransactions(catAllTxs);
+
+      // Filter month transactions for the selected month view
+      const selMonth = date.getMonth();
+      const selYear = date.getFullYear();
+      const catMonthTxs = catAllTxs.filter((t) => {
+        const d = new Date(t.transactionDate);
+        return d.getMonth() === selMonth && d.getFullYear() === selYear;
+      });
+      setTransactions(catMonthTxs);
 
       const foundBudget = monthBudgets.find((b) => b.categoryId === categoryId) || null;
       setBudget(foundBudget);
@@ -135,7 +146,7 @@ export default function CategoryDetailScreen() {
     setDate((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
   };
 
-  // Calculations
+  // Calculations for current selected month
   const totalExpense = useMemo(
     () => transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0),
     [transactions],
@@ -146,21 +157,29 @@ export default function CategoryDetailScreen() {
     [transactions],
   );
 
+  // Cumulative all-time calculations for true wallet balance (sync with Dompet Utama)
+  const cumulativeExpense = useMemo(
+    () => allCategoryTransactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0),
+    [allCategoryTransactions],
+  );
+
+  const cumulativeIncome = useMemo(
+    () => allCategoryTransactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0),
+    [allCategoryTransactions],
+  );
+
   const budgetAmount = budget?.amount ?? 0;
   const hasBudget = Boolean(budget && budget.amount > 0);
 
-  // Sisa saldo:
-  // If budget exists: (budget + income) - expense
-  // If no budget: income - expense
-  const remainingBalance = hasBudget
-    ? budgetAmount + totalIncome - totalExpense
-    : totalIncome - totalExpense;
+  // Saldo riil kas dompet kumulatif: murni total uang masuk dikurangi belanja agar sinkron dengan Dompet Utama
+  const realBalance = cumulativeIncome - cumulativeExpense;
 
-  // Percentage used calculation
-  const totalCeiling = hasBudget ? budgetAmount + totalIncome : totalIncome;
-  const usedPercentage = totalCeiling > 0 ? Math.min(100, Math.round((totalExpense / totalCeiling) * 100)) : 0;
-  const isOverBudget = totalCeiling > 0 ? totalExpense > totalCeiling : totalExpense > 0 && totalIncome === 0;
-  const isWarning = totalCeiling > 0 && usedPercentage >= 80 && !isOverBudget;
+  // Percentage used calculation (dari plafon belanja bulanan)
+  const usedPercentage = hasBudget && budgetAmount > 0
+    ? Math.min(100, Math.round((totalExpense / budgetAmount) * 100))
+    : 0;
+  const isOverBudget = hasBudget ? totalExpense > budgetAmount : realBalance < 0;
+  const isWarning = hasBudget && usedPercentage >= 80 && !isOverBudget;
 
   const statusColor = isOverBudget
     ? colors.expense
@@ -216,6 +235,31 @@ export default function CategoryDetailScreen() {
         description: descInput.trim() || undefined,
         transactionDate: ymdToISO(txDate),
       });
+
+      // Evaluate smart alerts for expense or reset on income
+      if (modalType === 'EXPENSE') {
+        const txDateObj = new Date(ymdToISO(txDate));
+        const newMonthExpense = totalExpense + cleanAmount;
+        const todayTxsExpense = transactions
+          .filter((t) => t.type === 'EXPENSE' && toYMD(new Date(t.transactionDate)) === txDate)
+          .reduce((s, t) => s + t.amount, 0);
+        const newTodayExpense = todayTxsExpense + cleanAmount;
+        const newRealBalance = realBalance - cleanAmount;
+
+        NotificationService.evaluateExpenseAlerts({
+          categoryId,
+          categoryName: category?.name || displayName,
+          budgetAmount: budget?.amount,
+          monthExpense: newMonthExpense,
+          todayExpense: newTodayExpense,
+          realBalance: newRealBalance,
+          cumulativeIncome,
+          date: txDateObj,
+        }).catch(() => {});
+      } else if (modalType === 'INCOME') {
+        NotificationService.resetLowBalanceAlert(categoryId);
+      }
+
       setModalVisible(false);
       setLoading(true);
       await loadData();
@@ -226,27 +270,49 @@ export default function CategoryDetailScreen() {
     }
   };
 
-  const handleSaveBudget = async () => {
-    const cleanAmount = Number(budgetAmountInput.replace(/\D/g, ''));
-    if (!cleanAmount || cleanAmount <= 0) {
-      setBudgetError('Masukkan nominal budget yang valid');
+  const handleRemoveBudget = async () => {
+    if (!budget) {
+      setBudgetModalVisible(false);
       return;
     }
+    setBudgetSubmitting(true);
+    setBudgetError(null);
+    try {
+      await BudgetService.delete(budget.id).catch(() => {});
+      setBudgetModalVisible(false);
+      setLoading(true);
+      await loadData();
+    } catch (e) {
+      setBudgetError(getErrorMessage(e));
+    } finally {
+      setBudgetSubmitting(false);
+    }
+  };
+
+  const handleSaveBudget = async () => {
+    const cleanAmount = Number(budgetAmountInput.replace(/\D/g, ''));
     if (!categoryId) return;
 
     setBudgetSubmitting(true);
     setBudgetError(null);
     try {
-      if (budget) {
-        // Delete old and re-create, or create new budget entry
-        await BudgetService.delete(budget.id).catch(() => {});
+      if (cleanAmount <= 0) {
+        // Jika nominal diset 0 atau dikosongkan, hilangkan plafon anggaran yang aktif
+        if (budget) {
+          await BudgetService.delete(budget.id).catch(() => {});
+        }
+      } else {
+        if (budget) {
+          // Hapus entri lama lalu simpan plafon baru
+          await BudgetService.delete(budget.id).catch(() => {});
+        }
+        await BudgetService.create({
+          categoryId,
+          amount: cleanAmount,
+          month: date.getMonth() + 1,
+          year: date.getFullYear(),
+        });
       }
-      await BudgetService.create({
-        categoryId,
-        amount: cleanAmount,
-        month: date.getMonth() + 1,
-        year: date.getFullYear(),
-      });
       setBudgetModalVisible(false);
       setLoading(true);
       await loadData();
@@ -291,7 +357,7 @@ export default function CategoryDetailScreen() {
   };
 
   const displayName = category?.name || initialName || 'Pos Kategori';
-  const iconName = getCategoryIcon(displayName);
+  const iconName = getCategoryIcon(displayName, category?.icon);
 
   const handleDeleteCategory = async () => {
     if (!categoryId) return;
@@ -415,21 +481,64 @@ export default function CategoryDetailScreen() {
                 </Text>
               </View>
 
-              {/* Sisa Saldo Amount */}
+              {/* Sisa Saldo / Kuota Plafon Amount */}
               <View style={styles.balanceContainer}>
-                <Text style={styles.balanceCaption}>Sisa Saldo Dompet</Text>
-                <Text
-                  style={[
-                    styles.balanceAmount,
-                    { color: remainingBalance >= 0 ? colors.ink : colors.expense },
-                  ]}
-                >
-                  {formatRupiah(remainingBalance)}
+                <Text style={styles.balanceCaption}>
+                  {hasBudget ? 'Sisa Plafon Anggaran Bulan Ini' : 'Sisa Saldo Dompet'}
                 </Text>
+                {hasBudget ? (
+                  totalExpense > budgetAmount ? (
+                    <View style={{ alignItems: 'center' }}>
+                      <Text
+                        style={[
+                          styles.balanceAmount,
+                          { color: colors.expense, fontSize: 18, lineHeight: 24, textAlign: 'center' },
+                        ]}
+                      >
+                        Melebihi budget target awal
+                      </Text>
+                      <Text style={{ fontSize: 13, color: colors.expense, fontWeight: '600', marginTop: 4 }}>
+                        Lebih {formatRupiah(totalExpense - budgetAmount)}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.balanceAmount,
+                        { color: colors.ink },
+                      ]}
+                    >
+                      {formatRupiah(budgetAmount - totalExpense)}
+                    </Text>
+                  )
+                ) : realBalance < 0 ? (
+                  <View style={{ alignItems: 'center' }}>
+                    <Text
+                      style={[
+                        styles.balanceAmount,
+                        { color: colors.expense, fontSize: 18, lineHeight: 24, textAlign: 'center' },
+                      ]}
+                    >
+                      Melebihi budget target awal
+                    </Text>
+                    <Text style={{ fontSize: 13, color: colors.expense, fontWeight: '600', marginTop: 4 }}>
+                      Lebih {formatRupiah(Math.abs(realBalance))}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text
+                    style={[
+                      styles.balanceAmount,
+                      { color: colors.ink },
+                    ]}
+                  >
+                    {formatRupiah(realBalance)}
+                  </Text>
+                )}
               </View>
 
-              {/* Progress Bar (if budget exists or ceiling > 0) */}
-              {totalCeiling > 0 ? (
+              {/* Progress Bar (if budget exists) */}
+              {hasBudget && budgetAmount > 0 ? (
                 <View style={styles.progressSection}>
                   <View style={styles.progressTrack}>
                     <View
@@ -444,10 +553,10 @@ export default function CategoryDetailScreen() {
                   </View>
                   <View style={styles.progressLabels}>
                     <Text style={styles.progressText}>
-                      Terpakai: {usedPercentage}% dari {formatRupiah(totalCeiling)}
+                      Terpakai: {usedPercentage}% dari {formatRupiah(budgetAmount)}
                     </Text>
                     <Text style={[styles.progressText, { color: statusColor, fontWeight: '700' }]}>
-                      {isOverBudget ? 'Defisit' : 'Tersedia'}
+                      {isOverBudget ? 'Melebihi Batas' : 'Tersedia'}
                     </Text>
                   </View>
                 </View>
@@ -455,40 +564,70 @@ export default function CategoryDetailScreen() {
 
               {/* Visual Calculation Formula Card */}
               <View style={styles.formulaCard}>
-                <Text style={styles.formulaTitle}>Alur Perhitungan Saldo Dompet:</Text>
-                <View style={styles.formulaRow}>
-                  <View style={styles.formulaItem}>
-                    <Text style={styles.formulaItemLabel}>Plafon</Text>
-                    <Text style={styles.formulaItemValue} numberOfLines={1}>{formatRupiah(budgetAmount)}</Text>
+                <Text style={styles.formulaTitle}>
+                  {hasBudget ? 'Alur Kuota Plafon Bulan Ini:' : 'Alur Saldo Kas Dompet:'}
+                </Text>
+                {hasBudget ? (
+                  <View style={styles.formulaRow}>
+                    <View style={styles.formulaItem}>
+                      <Text style={styles.formulaItemLabel}>Plafon Target</Text>
+                      <Text style={styles.formulaItemValue} numberOfLines={1}>{formatRupiah(budgetAmount)}</Text>
+                    </View>
+                    <Text style={styles.formulaOp}>−</Text>
+                    <View style={styles.formulaItem}>
+                      <Text style={styles.formulaItemLabel}>Belanja</Text>
+                      <Text style={[styles.formulaItemValue, { color: colors.expense }]} numberOfLines={1}>
+                        −{formatRupiah(totalExpense)}
+                      </Text>
+                    </View>
+                    <Text style={styles.formulaOp}>=</Text>
+                    <View style={[styles.formulaItem, styles.formulaResultItem]}>
+                      <Text style={styles.formulaItemLabel}>Sisa Kuota</Text>
+                      <Text
+                        style={[
+                          styles.formulaItemValue,
+                          { fontWeight: '800', color: totalExpense <= budgetAmount ? colors.ink : colors.expense },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {totalExpense > budgetAmount
+                          ? `Lebih ${formatRupiah(totalExpense - budgetAmount)}`
+                          : formatRupiah(budgetAmount - totalExpense)}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.formulaOp}>+</Text>
-                  <View style={styles.formulaItem}>
-                    <Text style={styles.formulaItemLabel}>Uang Masuk</Text>
-                    <Text style={[styles.formulaItemValue, { color: colors.income }]} numberOfLines={1}>
-                      +{formatRupiah(totalIncome)}
-                    </Text>
+                ) : (
+                  <View style={styles.formulaRow}>
+                    <View style={styles.formulaItem}>
+                      <Text style={styles.formulaItemLabel}>Total Masuk</Text>
+                      <Text style={[styles.formulaItemValue, { color: colors.income }]} numberOfLines={1}>
+                        +{formatRupiah(cumulativeIncome)}
+                      </Text>
+                    </View>
+                    <Text style={styles.formulaOp}>−</Text>
+                    <View style={styles.formulaItem}>
+                      <Text style={styles.formulaItemLabel}>Total Belanja</Text>
+                      <Text style={[styles.formulaItemValue, { color: colors.expense }]} numberOfLines={1}>
+                        −{formatRupiah(cumulativeExpense)}
+                      </Text>
+                    </View>
+                    <Text style={styles.formulaOp}>=</Text>
+                    <View style={[styles.formulaItem, styles.formulaResultItem]}>
+                      <Text style={styles.formulaItemLabel}>Saldo Kas</Text>
+                      <Text
+                        style={[
+                          styles.formulaItemValue,
+                          { fontWeight: '800', color: realBalance >= 0 ? colors.ink : colors.expense },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {realBalance < 0
+                          ? `Lebih ${formatRupiah(Math.abs(realBalance))}`
+                          : formatRupiah(realBalance)}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.formulaOp}>−</Text>
-                  <View style={styles.formulaItem}>
-                    <Text style={styles.formulaItemLabel}>Belanja</Text>
-                    <Text style={[styles.formulaItemValue, { color: colors.expense }]} numberOfLines={1}>
-                      −{formatRupiah(totalExpense)}
-                    </Text>
-                  </View>
-                  <Text style={styles.formulaOp}>=</Text>
-                  <View style={[styles.formulaItem, styles.formulaResultItem]}>
-                    <Text style={styles.formulaItemLabel}>Sisa</Text>
-                    <Text
-                      style={[
-                        styles.formulaItemValue,
-                        { fontWeight: '800', color: remainingBalance >= 0 ? colors.ink : colors.expense },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {formatRupiah(remainingBalance)}
-                    </Text>
-                  </View>
-                </View>
+                )}
               </View>
 
               {/* Breakdown Grid */}
@@ -496,7 +635,7 @@ export default function CategoryDetailScreen() {
                 <View style={styles.statColumn}>
                   <Text style={styles.statLabel}>Plafon Anggaran</Text>
                   <Text style={styles.statValue}>
-                    {hasBudget ? formatRupiah(budgetAmount) : 'Tidak diset'}
+                    {hasBudget ? formatRupiah(budgetAmount) : 'Rp 0 (Bebas)'}
                   </Text>
                   <Pressable
                     onPress={() => {
@@ -514,17 +653,17 @@ export default function CategoryDetailScreen() {
                 </View>
 
                 <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Saldo Masuk / Isi</Text>
-                  <Text style={[styles.statValue, { color: colors.income }]}>
-                    +{formatRupiah(totalIncome)}
+                  <Text style={styles.statLabel}>Saldo Riil Kas</Text>
+                  <Text style={[styles.statValue, { color: realBalance >= 0 ? colors.ink : colors.expense }]}>
+                    {realBalance >= 0 ? formatRupiah(realBalance) : `Defisit ${formatRupiah(Math.abs(realBalance))}`}
                   </Text>
                   <Text style={styles.statSub}>
-                    {transactions.filter((t) => t.type === 'INCOME').length} transaksi
+                    {cumulativeIncome > 0 ? `+${formatRupiah(cumulativeIncome)} total masuk` : 'Belum ada top-up'}
                   </Text>
                 </View>
 
                 <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Total Belanja</Text>
+                  <Text style={styles.statLabel}>Belanja Bulan Ini</Text>
                   <Text style={[styles.statValue, { color: colors.expense }]}>
                     −{formatRupiah(totalExpense)}
                   </Text>
@@ -547,8 +686,8 @@ export default function CategoryDetailScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Catat belanja dari dompet"
               >
-                <Ionicons name="arrow-up-circle" size={20} color={colors.white} />
-                <Text style={styles.actionBtnText}>Belanja Dompet</Text>
+                <Ionicons name="arrow-up-circle" size={18} color={colors.white} />
+                <Text style={styles.actionBtnText}>Belanja</Text>
               </Pressable>
 
               <Pressable
@@ -561,8 +700,22 @@ export default function CategoryDetailScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Isi saldo dompet"
               >
-                <Ionicons name="arrow-down-circle" size={20} color={colors.white} />
-                <Text style={styles.actionBtnText}>Isi Saldo Dompet</Text>
+                <Ionicons name="arrow-down-circle" size={18} color={colors.white} />
+                <Text style={styles.actionBtnText}>Isi Saldo</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => router.push({ pathname: '/transfer', params: { sourceId: categoryId } })}
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  styles.transferActionBtn,
+                  pressed && styles.btnPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Pindah saldo ke dompet lain"
+              >
+                <Ionicons name="swap-horizontal" size={18} color={colors.white} />
+                <Text style={styles.actionBtnText}>Pindah</Text>
               </Pressable>
             </View>
 
@@ -854,10 +1007,22 @@ export default function CategoryDetailScreen() {
         >
           <Pressable style={styles.modalBackdrop} onPress={() => setBudgetModalVisible(false)} />
           <View style={styles.budgetModalCard}>
-            <Text style={styles.sheetTitle}>Atur Budget Plafon</Text>
-            <Text style={styles.sheetSubtitle}>
-              Batas alokasi anggaran {displayName} untuk bulan {formatMonth(date)}
-            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                <Text style={styles.sheetTitle}>Atur Budget Plafon</Text>
+                <Text style={styles.sheetSubtitle}>
+                  Batas alokasi anggaran {displayName} untuk bulan {formatMonth(date)}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setBudgetModalVisible(false)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Tutup modal"
+              >
+                <Ionicons name="close" size={22} color={colors.inkSecondary} />
+              </Pressable>
+            </View>
 
             {budgetError ? (
               <View style={styles.modalErrorBanner}>
@@ -866,7 +1031,7 @@ export default function CategoryDetailScreen() {
               </View>
             ) : null}
 
-            <Text style={[styles.inputLabel, { marginTop: spacing.md }]}>Target Budget (Rp)</Text>
+            <Text style={[styles.inputLabel, { marginTop: spacing.md }]}>Target Plafon Bulanan (Rp)</Text>
             <View style={styles.amountInputWrap}>
               <Text style={styles.currencyPrefix}>Rp</Text>
               <TextInput
@@ -880,15 +1045,45 @@ export default function CategoryDetailScreen() {
               />
             </View>
 
-            <View style={styles.modalButtonsRow}>
+            <Text style={styles.budgetHintText}>
+              Bisa diatur bebas atau dijadikan Rp 0. Masukkan 0 atau kosongkan untuk menghilangkan batas plafon dompet ini.
+            </Text>
+
+            {budgetAmountInput && budgetAmountInput !== '0' ? (
               <Pressable
-                onPress={() => setBudgetModalVisible(false)}
-                style={styles.modalCancelBtn}
+                onPress={() => setBudgetAmountInput('0')}
+                style={styles.zeroPillBtn}
                 accessibilityRole="button"
-                accessibilityLabel="Batal"
+                accessibilityLabel="Nolkan plafon ke 0"
               >
-                <Text style={styles.modalCancelText}>Batal</Text>
+                <Ionicons name="refresh-outline" size={13} color={colors.blue500} />
+                <Text style={styles.zeroPillText}>Nolkan Plafon (Rp 0)</Text>
               </Pressable>
+            ) : null}
+
+            <View style={styles.modalButtonsRow}>
+              {budget ? (
+                <Pressable
+                  onPress={handleRemoveBudget}
+                  disabled={budgetSubmitting}
+                  style={styles.modalRemoveBudgetBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hapus plafon dompet"
+                >
+                  <Ionicons name="trash-outline" size={16} color={colors.expense} />
+                  <Text style={styles.modalRemoveBudgetText}>Hapus Plafon</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => setBudgetModalVisible(false)}
+                  style={styles.modalCancelBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Batal"
+                >
+                  <Text style={styles.modalCancelText}>Batal</Text>
+                </Pressable>
+              )}
+
               <Pressable
                 onPress={handleSaveBudget}
                 disabled={budgetSubmitting}
@@ -1215,6 +1410,9 @@ const styles = StyleSheet.create({
   incomeActionBtn: {
     backgroundColor: colors.income,
   },
+  transferActionBtn: {
+    backgroundColor: colors.blue500,
+  },
   actionBtnText: {
     fontSize: 14,
     fontWeight: '700',
@@ -1515,6 +1713,44 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     padding: spacing.xl,
     ...shadow.hero,
+  },
+  budgetHintText: {
+    fontSize: 12,
+    color: colors.inkSecondary,
+    lineHeight: 16,
+    marginTop: -4,
+    marginBottom: spacing.sm,
+  },
+  zeroPillBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.sky100,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.chip,
+    marginBottom: spacing.md,
+  },
+  zeroPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.blue500,
+  },
+  modalRemoveBudgetBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: radius.control,
+    backgroundColor: colors.expenseTint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  modalRemoveBudgetText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.expense,
   },
   modalButtonsRow: {
     flexDirection: 'row',
