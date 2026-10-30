@@ -9,6 +9,7 @@ import { transactionSchema, TransactionFormValues } from '../schemas/transaction
 import { Transaction, TransactionService } from '../services/transaction.service';
 import { Category, CategoryService } from '../services/category.service';
 import { Budget, BudgetService } from '../services/budget.service';
+import { NotificationService } from '../services/notification.service';
 import { colors, getCategoryIcon, radius, spacing } from '../theme';
 import { confirmAction, formatRupiah, formatThousands, getErrorMessage, getMonthRange, toYMD, ymdToISO } from '../utils/format';
 import { Loading } from '../components/ui/common';
@@ -58,7 +59,7 @@ export default function TransactionFormScreen() {
         const [cats, tx, txList, budgetList] = await Promise.all([
           CategoryService.getAll(),
           id ? TransactionService.getById(id) : Promise.resolve(null),
-          TransactionService.getAll(getMonthRange(now)).catch(() => [] as Transaction[]),
+          TransactionService.getAll().catch(() => [] as Transaction[]),
           BudgetService.getAll(now.getMonth() + 1, now.getFullYear()).catch(() => [] as Budget[]),
         ]);
         setCategories(cats);
@@ -101,6 +102,61 @@ export default function TransactionFormScreen() {
     try {
       if (isEdit && id) await TransactionService.update(id, payload);
       else await TransactionService.create(payload);
+
+      // Evaluate smart alerts for expense transactions
+      if (payload.type === 'EXPENSE') {
+        const catBudget = budgets.find((b) => b.categoryId === payload.categoryId);
+        const catObj = categories.find((c) => c.id === payload.categoryId);
+        if (catObj) {
+          const txDateObj = new Date(payload.transactionDate);
+          const txMonth = txDateObj.getMonth();
+          const txYear = txDateObj.getFullYear();
+          const txYMD = toYMD(txDateObj);
+
+          // Monthly expense for budget ceiling check
+          const existingExpense = transactions
+            .filter((t) => {
+              if (t.categoryId !== payload.categoryId || t.type !== 'EXPENSE') return false;
+              const d = new Date(t.transactionDate);
+              return d.getMonth() === txMonth && d.getFullYear() === txYear;
+            })
+            .reduce((s, t) => s + t.amount, 0);
+          const newMonthExpense = existingExpense + payload.amount;
+
+          // Today expense for daily pacing limit check
+          const existingTodayExpense = transactions
+            .filter((t) => {
+              if (t.categoryId !== payload.categoryId || t.type !== 'EXPENSE') return false;
+              return toYMD(new Date(t.transactionDate)) === txYMD;
+            })
+            .reduce((s, t) => s + t.amount, 0);
+          const newTodayExpense = existingTodayExpense + payload.amount;
+
+          // Cumulative cash balance for low balance / deficit check
+          const catIncome = transactions
+            .filter((t) => t.categoryId === payload.categoryId && t.type === 'INCOME')
+            .reduce((s, t) => s + t.amount, 0);
+          const catExpense = transactions
+            .filter((t) => t.categoryId === payload.categoryId && t.type === 'EXPENSE')
+            .reduce((s, t) => s + t.amount, 0);
+          const newRealBalance = catIncome - (catExpense + payload.amount);
+
+          NotificationService.evaluateExpenseAlerts({
+            categoryId: payload.categoryId,
+            categoryName: catObj.name,
+            budgetAmount: catBudget?.amount,
+            monthExpense: newMonthExpense,
+            todayExpense: newTodayExpense,
+            realBalance: newRealBalance,
+            cumulativeIncome: catIncome,
+            date: txDateObj,
+          }).catch(() => {});
+        }
+      } else if (payload.type === 'INCOME') {
+        // Reset low balance alert status if wallet is replenished
+        NotificationService.resetLowBalanceAlert(payload.categoryId);
+      }
+
       router.back();
     } catch (e) {
       setSubmitError(getErrorMessage(e));
@@ -148,7 +204,8 @@ export default function TransactionFormScreen() {
       const catBudget = budgets.find((b) => b.categoryId === cat.id);
       const budgetAmount = catBudget?.amount ?? 0;
       const hasBudget = Boolean(catBudget && catBudget.amount > 0);
-      const sisa = hasBudget ? budgetAmount + catIncome - catExpense : catIncome - catExpense;
+      // Saldo kas riil dompet: murni pemasukan dikurangi pengeluaran agar selalu sinkron dengan Dompet Utama
+      const sisa = catIncome - catExpense;
       map.set(cat.id, { sisa, hasBudget, budgetAmount, name: cat.name });
     });
     return map;
@@ -259,7 +316,7 @@ export default function TransactionFormScreen() {
                   ]}
                 >
                   <View style={[styles.categoryIconWrap, active && { backgroundColor: colors.white }]}>
-                    <Ionicons name={getCategoryIcon(c.name)} size={18} color={active ? accent : colors.muted} />
+                    <Ionicons name={getCategoryIcon(c.name, c.icon)} size={18} color={active ? accent : colors.muted} />
                   </View>
                   <View style={styles.categoryInfo}>
                     <Text style={[styles.categoryText, active && { color: accent, fontWeight: '700' }]} numberOfLines={1}>
@@ -272,7 +329,7 @@ export default function TransactionFormScreen() {
                       ]}
                       numberOfLines={1}
                     >
-                      Sisa: {formatRupiah(sisaNominal)}
+                      {isNegative ? 'Melebihi budget target awal' : `Sisa: ${formatRupiah(sisaNominal)}`}
                     </Text>
                   </View>
                   {active && (
@@ -305,7 +362,12 @@ export default function TransactionFormScreen() {
                         {type === 'EXPENSE' ? '-' : '+'}{formatRupiah(amountNum)}
                       </Text>
                       <Text style={styles.impactBalanceAfter}>
-                        Estimasi sisa: <Text style={{ color: simulatedWalletAfter < 0 ? colors.expense : accent, fontWeight: '800' }}>{formatRupiah(simulatedWalletAfter)}</Text>
+                        Estimasi sisa:{' '}
+                        <Text style={{ color: simulatedWalletAfter < 0 ? colors.expense : accent, fontWeight: '800' }}>
+                          {simulatedWalletAfter < 0
+                            ? 'Melebihi budget target awal'
+                            : formatRupiah(simulatedWalletAfter)}
+                        </Text>
                       </Text>
                     </>
                   ) : (
