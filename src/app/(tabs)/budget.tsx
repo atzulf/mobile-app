@@ -362,7 +362,7 @@ export default function DompetScreen() {
               ]}
             >
               {totalWalletBalance < 0
-                ? `Defisit ${formatRupiah(Math.abs(totalWalletBalance))}`
+                ? `Minus ${formatRupiah(Math.abs(totalWalletBalance))}`
                 : formatRupiah(totalWalletBalance)}
             </Text>
             <Text style={styles.summarySub}>{wallets.length} dompet aktif</Text>
