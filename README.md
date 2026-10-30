@@ -1,5 +1,13 @@
 # Catetan Duit - Frontend Mobile App
 
+<div align="center">
+
+| Beranda & Saldo | Pacing Belanja | Detail Dompet | Anggaran & Plafon | Transfer Antar Dompet |
+| :---: | :---: | :---: | :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/f0f661ce-e691-4dfd-99a7-e5c4accbc85c" width="180" alt="Beranda & Saldo" /> | <img src="https://github.com/user-attachments/assets/509ff003-2145-4bb2-a0d8-f985739d4667" width="180" alt="Pacing Belanja Harian" /> | <img src="https://github.com/user-attachments/assets/f2db707a-ef81-4f7b-813f-00b9b9892dde" width="180" alt="Detail Dompet" /> | <img src="https://github.com/user-attachments/assets/108ef6aa-aa00-4a4f-ac93-ffdb6fbb6c49" width="180" alt="Anggaran & Plafon" /> | <img src="https://github.com/user-attachments/assets/da8a39f2-b457-46fc-ba0a-636ea64dc7d1" width="180" alt="Transfer Antar Dompet" /> |
+
+</div>
+
 Aplikasi pencatatan dan monitoring keuangan personal (*personal finance monitoring*) berbasis mobile yang dibangun menggunakan **React Native** dan **Expo SDK 58**. Aplikasi ini dirancang untuk memudahkan pengguna dalam mencatat pemasukan dan pengeluaran harian, mengelola anggaran bulanan per kategori, serta menganalisis kondisi finansial melalui grafik visual interaktif.
 
 ---
@@ -19,44 +27,53 @@ Aplikasi pencatatan dan monitoring keuangan personal (*personal finance monitori
 
 ### 1. Dashboard Finansial Interaktif
 * **Kartu Saldo Utama**: Menampilkan total saldo bersih dengan fitur *privacy toggle* (sembunyikan / tampilkan nominal saldo).
+* **Arus Kas Bersih (*Net Cash Flow*)**: Indikator surplus kas dan persentase tabungan yang tersisa dari total pemasukan.
+* **Widget Pacing Belanja Harian**: Rekomendasi belanja harian adaptif (sisa plafon dibagi sisa hari) atau mode kustom manual dengan batas harian tetap.
 * **Filter Periode Cepat**: Navigasi filter instan untuk rentang waktu Hari Ini, Minggu Ini, Bulan Ini, dan Semua Periode.
-* **Ringkasan Arus Kas**: Kartu statistik total pemasukan (*income*) dan total pengeluaran (*expense*) pada periode aktif.
-* **Mini Budget Overview**: Pratinjau langsung kondisi pagu anggaran bulanan beserta indikator persentase pemakaian.
+* **Visual Alokasi Kas**: Diagram arus saldo dari Dompet Utama ke pos-pos teralokasi hingga kas bebas.
 * **Transaksi Terbaru**: Daftar riwayat transaksi terakhir yang dapat diakses langsung dari beranda.
 * **Akses Cepat (FAB)**: Tombol melayang (*Floating Action Button*) untuk pencatatan transaksi baru secara cepat.
-* **Modal Panduan Pengguna**: Panduan ringkas penggunaan aplikasi bagi pengguna baru.
+* **Modal Panduan Pengguna**: Panduan ringkas alur kerja dompet bagi pengguna baru.
 
 ### 2. Pencatatan Transaksi (Income & Expense)
-* Form pencatatan lengkap: nominal uang, tipe (Pemasukan / Pengeluaran), kategori, tanggal transaksi, dan catatan keterangan.
+* Form pencatatan lengkap: nominal uang, tipe (Pemasukan / Pengeluaran), kategori dompet, tanggal transaksi, dan catatan keterangan.
 * Input nominal interaktif dengan format pemisah ribuan otomatis (IDR Rupiah).
 * Pemilihan tanggal fleksibel menggunakan `@react-native-community/datetimepicker`.
 * Validasi form berbasis skema menggunakan **React Hook Form** dan **Zod**.
 
-### 3. Riwayat & Filter Transaksi
-* Pencarian transaksi secara *real-time* berdasarkan keterangan atau nama kategori.
-* Tab penyaringan tipe transaksi: Semua, Pemasukan, atau Pengeluaran.
-* Filter transaksi berdasarkan kategori spesifik.
-* Pengelompokan data transaksi berdasarkan tanggal secara kronologis.
-* Fitur untuk mengubah (*edit*) maupun menghapus (*delete*) data transaksi yang sudah tercatat.
+### 3. Transfer Antar Dompet (Pindah Saldo)
+* Pemindahan alokasi saldo kas antar dompet kecil dengan aman tanpa mengubah total saldo fisik di Dompet Utama.
+* Simulasi dampak kas *real-time* sebelum dan sesudah transfer untuk dompet sumber maupun dompet penerima.
+* Tombol tukar posisi dompet (*swap*), tombol nominal instan (50k, 100k, 250k, 500k), dan opsi "Semua Saldo".
+* Deteksi dan peringatan konfirmasi jika saldo dompet sumber kurang (menghindari saldo minus yang tidak disengaja).
 
-### 4. Manajemen Anggaran Bulanan (Budgeting)
-* Menetapkan batas (*limit*) anggaran belanja per kategori untuk setiap bulan.
-* *Progress bar* visual yang membandingkan realisasi pengeluaran aktual terhadap pagu anggaran.
+### 4. Manajemen Anggaran Bulanan & Plafon Fleksibel (Budgeting)
+* Menetapkan batas (*plafon*) belanja per kategori untuk setiap bulan, dengan fleksibilitas menghapus plafon atau menolkan (Rp 0 / Bebas).
+* *Progress bar* visual yang membandingkan realisasi pengeluaran aktual terhadap target pagu anggaran.
 * Indikator status anggaran real-time:
   * **Aman**: Pengeluaran masih di bawah 80% dari batas anggaran.
-  * **Peringatan**: Pengeluaran telah mencapai atau melebihi 80% dari batas anggaran.
-  * **Overbudget**: Pengeluaran telah melampaui 100% dari alokasi anggaran.
+  * **Peringatan Kuota**: Pengeluaran telah mencapai atau melebihi 80% dari pagu anggaran.
+  * **Plafon Terlampaui**: Pengeluaran telah melampaui 100% dari alokasi awal.
 
-### 5. Statistik & Visualisasi Finansial
+### 5. Notifikasi Pintar Lokal (Push Notifications)
+* Ditenagai oleh `expo-notifications` dengan *channel* prioritas tinggi di Android (`AndroidImportance.MAX`).
+* 4 pemicu notifikasi otomatis:
+  * Peringatan kuota 80% saat belanja mendekati batas plafon.
+  * Peringatan 100% saat pengeluaran melampaui plafon bulanan.
+  * Peringatan saldo kas menipis (sisa $\le$ Rp 50.000 atau $\le$ 15% dari total dana masuk) dan peringatan saldo minus.
+  * Peringatan belanja harian tinggi jika pengeluaran hari ini melebihi target pacing harian.
+* Panel uji coba notifikasi instan langsung di tab Pengaturan.
+
+### 6. Statistik & Visualisasi Finansial
 * Visualisasi grafik tren pengeluaran mingguan dan bulanan menggunakan pustaka grafik interaktif.
 * Pembagian (*breakdown*) pengeluaran per kategori beserta persentase kontribusinya.
 * Analisis komparatif antara pemasukan dan pengeluaran untuk mengevaluasi kesehatan finansial.
 
-### 6. Kustomisasi Kategori & Pengaturan Profil
-* Manajemen kategori mandiri: Tambah kategori baru, edit nama kategori, serta hapus kategori.
-* Pemilihan ikon kategori visual dari pustaka **Ionicons**.
-* Kustomisasi nama panggilan pengguna (*user profile*) yang disimpan di *local storage*.
-* Status konektivitas server dan informasi versi aplikasi.
+### 7. Kustomisasi Kategori & Pengaturan Profil
+* Manajemen kategori mandiri: Tambah pos dompet baru, edit nama kategori, serta hapus kategori.
+* Pemilihan ikon visual dari koleksi pustaka **Ionicons**.
+* Kustomisasi nama profil pengguna (*user profile*) yang tersimpan persisten di *storage*.
+* Pengaturan mode pacing belanja harian (Otomatis vs Kustom).
 
 ---
 
@@ -64,16 +81,16 @@ Aplikasi pencatatan dan monitoring keuangan personal (*personal finance monitori
 
 | Kategori | Teknologi / Pustaka | Versi | Fungsi |
 | :--- | :--- | :--- | :--- |
-| **Core Framework** | React Native | 0.88.0 | Fondasi pengembangan aplikasi mobile multi-platform |
-| **Platform Tooling**| Expo SDK | ~58.0.0 | Toolchain, runtime, dan ekosistem build native |
+| **Core Framework** | React Native | 0.88.1 | Fondasi pengembangan aplikasi mobile multi-platform |
+| **Platform Tooling**| Expo SDK | ~58.0.20 | Toolchain, runtime, dan ekosistem build native |
 | **Bahasa** | TypeScript | ~6.0.3 | Pengetikan statis untuk keandalan kode |
-| **Routing / Navigasi** | Expo Router | ~58.0.26 | Navigasi berbasis struktur berkas (*file-based routing*) |
-| **Form & Validasi** | React Hook Form & Zod | ^7.89 / ^3.23 | Manajemen state form dan validasi skema data |
+| **Routing / Navigasi** | Expo Router | ~58.0.28 | Navigasi berbasis struktur berkas (*file-based routing*) |
+| **Form & Validasi** | React Hook Form & Zod | ^7.89 / ^4.6 | Manajemen state form dan validasi skema data |
+| **Push Notifications** | Expo Notifications | ~58.1.7 | Peringatan lokal kuota anggaran dan saldo |
 | **HTTP Client** | Axios | ^1.20.0 | Komunikasi data dengan REST API backend |
 | **Visualisasi Data** | React Native Gifted Charts | ^1.4.81 | Render grafik batang dan tren pengeluaran |
 | **Date Time Picker** | @react-native-community/datetimepicker | 9.2.1 | Komponen native pemilih tanggal dan waktu |
 | **Komponen UI** | Expo Vector Icons (Ionicons) | ^15.1.1 | Pustaka ikonografi antarmuka |
-| **Efek Visual** | Expo Linear Gradient & Glass Effect | ~58.0.3 | Gradient styling dan visual elevation |
 | **SafeArea & Gesture**| React Native Safe Area Context & Gesture Handler | Terintegrasi | Penanganan area aman layar dan interaksi gestur |
 
 ---
@@ -96,7 +113,8 @@ mobile-app/
 │   │   │   └── settings.tsx # Halaman Pengaturan & Kategori
 │   │   ├── _layout.tsx      # Root Stack Navigator & status bar setup
 │   │   ├── category-detail.tsx  # Detail transaksi per kategori
-│   │   └── transaction-form.tsx # Modal form tambah & ubah transaksi
+│   │   ├── transaction-form.tsx # Modal form tambah & ubah transaksi
+│   │   └── transfer.tsx     # Modal transfer saldo antar dompet
 │   ├── components/          # Komponen UI modular
 │   │   ├── ui/
 │   │   │   └── common.tsx   # Komponen atomik: Button, Chip, Fab, State Views
@@ -109,18 +127,22 @@ mobile-app/
 │   ├── schemas/             # Skema validasi Zod (transaksi & anggaran)
 │   │   ├── budget.schema.ts
 │   │   └── transaction.schema.ts
-│   ├── services/            # Integrasi REST API (Axios client)
+│   ├── services/            # Integrasi REST API & Local State
 │   │   ├── api.ts           # Konfigurasi instance Axios & Base URL
 │   │   ├── budget.service.ts
 │   │   ├── category.service.ts
+│   │   ├── notification.service.ts # Manajemen notifikasi cerdas lokal
+│   │   ├── pacing.service.ts       # Manajemen target pacing harian
 │   │   ├── profile.service.ts
 │   │   ├── statistics.service.ts
 │   │   └── transaction.service.ts
 │   ├── theme/               # Design token: warna, radius, spasi, shadow
 │   │   └── index.ts
-│   └── utils/               # Fungsi utilitas format rupiah, tanggal, rentang periode
-│       └── format.ts
-├── app.json                 # Konfigurasi proyek Expo
+│   └── utils/               # Fungsi format rupiah, tanggal, dan polyfill
+│       ├── format.ts
+│       └── zod-compat.ts
+├── app.json                 # Konfigurasi proyek Expo & Project ID
+├── eas.json                 # Konfigurasi build APK standalone
 ├── package.json             # Dependensi dan skrip proyek
 └── tsconfig.json            # Konfigurasi TypeScript
 ```
@@ -151,33 +173,26 @@ Daftar perintah yang dapat dijalankan melalui terminal:
 | `npm run web` | Menjalankan aplikasi versi web di browser |
 | `npm run lint` | Menjalankan ESLint untuk mengecek kualitas dan gaya penulisan kode |
 | `npx tsc --noEmit` | Menjalankan validasi pengetikan TypeScript |
-| `npx expo-doctor` | Mendiagnosis integritas dependensi dan konfigurasi Expo |
 
 ---
 
-## Membangun Berkas Aplikasi (EAS Build)
+## Membangun Berkas Aplikasi (EAS Build APK)
 
-Untuk menghasilkan berkas instalasi mandiri (*standalone build*) seperti file **APK** (Android) tanpa memerlukan Expo Go, gunakan **EAS CLI**:
+Untuk menghasilkan berkas instalasi mandiri seperti file **APK** (Android) tanpa memerlukan Expo Go, gunakan **EAS CLI**:
 
-### 1. Pasang EAS CLI secara global
-
-```bash
-npm install -g eas-cli
-```
-
-### 2. Login ke Akun Expo
+### 1. Login ke Akun Expo
 
 ```bash
-eas login
+npx eas-cli login
 ```
 
-### 3. Buat Berkas APK Preview (Android)
+### 2. Buat Berkas APK Preview (Android)
 
 ```bash
-eas build --platform android --profile preview
+npx eas-cli build -p android --profile preview
 ```
 
-Setelah proses *cloud build* selesai, tautan untuk mengunduh berkas APK siap pakai akan tersedia di terminal dan dasbor Expo Anda.
+Setelah proses *cloud build* selesai, tautan dan kode QR untuk mengunduh berkas APK siap pakai akan tersedia di terminal dan dasbor Expo Anda.
 
 ---
 
