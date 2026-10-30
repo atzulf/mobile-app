@@ -6,5 +6,5 @@ const BASE_URL = 'https://backendcatetanduit.vercel.app';
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 25000,
 });
