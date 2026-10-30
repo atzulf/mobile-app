@@ -73,18 +73,18 @@ export default function DashboardScreen() {
       const budgetAmount = catBudget?.amount ?? 0;
       const hasBudget = Boolean(catBudget && catBudget.amount > 0);
 
-      // Sisa saldo dompet:
-      // If budget exists: (budget + income) - expense
-      // If no budget: income - expense
-      const sisa = hasBudget ? budgetAmount + catIncome - catExpense : catIncome - catExpense;
-      const ceiling = hasBudget ? budgetAmount + catIncome : catIncome;
-      const pctUsed = ceiling > 0 ? Math.min(100, Math.round((catExpense / ceiling) * 100)) : 0;
-      const isExceeded = ceiling > 0 ? catExpense > ceiling : catExpense > 0 && catIncome === 0;
-      const isWarning = ceiling > 0 && pctUsed >= 80 && !isExceeded;
+      // Saldo riil dompet: murni pemasukan dikurangi belanja agar sinkron dengan Dompet Utama
+      const sisa = catIncome - catExpense;
+      const pctUsed = hasBudget && budgetAmount > 0
+        ? Math.min(100, Math.round((catExpense / budgetAmount) * 100))
+        : 0;
+      const isExceeded = hasBudget ? catExpense > budgetAmount : sisa < 0;
+      const isWarning = hasBudget ? pctUsed >= 80 && !isExceeded : false;
 
       return {
         id: cat.id,
         name: cat.name,
+        icon: cat.icon,
         hasBudget,
         budgetAmount,
         income: catIncome,
@@ -307,7 +307,7 @@ export default function DashboardScreen() {
                 >
                   <View style={styles.walletCardHeader}>
                     <View style={styles.walletIconWrap}>
-                      <Ionicons name={getCategoryIcon(wallet.name)} size={18} color={colors.primary} />
+                      <Ionicons name={getCategoryIcon(wallet.name, wallet.icon)} size={18} color={colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.walletName} numberOfLines={1}>
@@ -322,16 +322,35 @@ export default function DashboardScreen() {
                   </View>
 
                   <View style={styles.walletBalanceWrap}>
-                    <Text style={styles.walletBalanceLabel}>Sisa Boleh Dibelanjakan</Text>
-                    <Text
-                      style={[
-                        styles.walletBalanceValue,
-                        { color: wallet.sisa >= 0 ? colors.ink : colors.expense },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {formatRupiah(wallet.sisa)}
+                    <Text style={styles.walletBalanceLabel}>
+                      {wallet.hasBudget ? 'Sisa Plafon Anggaran' : 'Saldo Dompet'}
                     </Text>
+                    {wallet.isExceeded || (!wallet.hasBudget && wallet.sisa < 0) ? (
+                      <View>
+                        <Text
+                          style={[
+                            styles.walletBalanceValue,
+                            { color: colors.expense, fontSize: 13, lineHeight: 18 },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          Melebihi budget target awal
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.expense, fontWeight: '600', marginTop: 2 }}>
+                          Lebih {formatRupiah(wallet.hasBudget ? Math.max(0, wallet.expense - wallet.budgetAmount) : Math.abs(wallet.sisa))}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.walletBalanceValue,
+                          { color: colors.ink },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {formatRupiah(wallet.hasBudget ? Math.max(0, wallet.budgetAmount - wallet.expense) : wallet.sisa)}
+                      </Text>
+                    )}
                   </View>
 
                   {wallet.hasBudget ? (
@@ -364,7 +383,7 @@ export default function DashboardScreen() {
                         Total Belanja: {formatRupiah(wallet.expense)}
                       </Text>
                       <Text style={styles.walletNoBudgetPrompt} numberOfLines={1}>
-                        💡 Belum ada plafon bulanan
+                        💡 Plafon: Rp 0 (Bebas)
                       </Text>
                     </View>
                   )}
