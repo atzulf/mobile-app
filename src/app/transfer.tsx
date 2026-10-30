@@ -140,7 +140,7 @@ export default function TransferScreen() {
       const confirmExceed = await new Promise<boolean>((resolve) => {
         Alert.alert(
           'Saldo Dompet Sumber Kurang',
-          `Saldo dompet ${sourceWallet?.name} (${formatRupiah(sourceBalance)}) lebih kecil dari nominal transfer (${formatRupiah(amountNum)}). Dompet sumber akan mengalami defisit. Lanjutkan?`,
+          `Saldo dompet ${sourceWallet?.name} (${formatRupiah(sourceBalance)}) lebih kecil dari nominal transfer (${formatRupiah(amountNum)}). Saldo dompet sumber akan menjadi minus (nombok). Lanjutkan?`,
           [
             { text: 'Batal', style: 'cancel', onPress: () => resolve(false) },
             { text: 'Tetap Transfer', style: 'destructive', onPress: () => resolve(true) },
@@ -323,7 +323,7 @@ export default function TransferScreen() {
                       Dompet {cat.name}
                     </Text>
                     <Text style={[styles.walletPillBal, active && { color: colors.white }]}>
-                      {bal < 0 ? `Defisit ${formatRupiah(Math.abs(bal))}` : formatRupiah(bal)}
+                      {bal < 0 ? `Minus ${formatRupiah(Math.abs(bal))}` : formatRupiah(bal)}
                     </Text>
                   </View>
                 </Pressable>
@@ -355,7 +355,7 @@ export default function TransferScreen() {
                       Dompet {cat.name}
                     </Text>
                     <Text style={[styles.walletPillBal, active && { color: colors.white }]}>
-                      {bal < 0 ? `Defisit ${formatRupiah(Math.abs(bal))}` : formatRupiah(bal)}
+                      {bal < 0 ? `Minus ${formatRupiah(Math.abs(bal))}` : formatRupiah(bal)}
                     </Text>
                   </View>
                 </Pressable>
@@ -435,56 +435,134 @@ export default function TransferScreen() {
           {/* Live Impact Simulation Card */}
           <View style={styles.impactCard}>
             <View style={styles.impactTitleRow}>
-              <Ionicons name="analytics-outline" size={16} color={colors.primary} />
-              <Text style={styles.impactTitle}>Simulasi Dampak Kas:</Text>
+              <View style={styles.impactTitleIconWrap}>
+                <Ionicons name="analytics-outline" size={15} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.impactTitle}>Simulasi Dampak Kas Real-Time</Text>
+                <Text style={styles.impactSubtitle}>Perkiraan saldo setelah proses transfer berhasil</Text>
+              </View>
             </View>
 
             <View style={styles.impactDetails}>
-              {/* Source Simulation */}
-              <View style={styles.impactRow}>
-                <Text style={styles.impactLabel} numberOfLines={1}>
-                  Dompet {sourceWallet?.name ?? 'Sumber'}:
-                </Text>
-                <Text style={styles.impactValues}>
-                  {formatRupiah(sourceBalance)} →{' '}
-                  <Text style={{ fontWeight: '800', color: simulatedSourceAfter < 0 ? colors.expense : colors.ink }}>
+              {/* 1. Source Simulation */}
+              <View style={styles.impactItem}>
+                <View style={styles.impactItemLeft}>
+                  <View style={[styles.impactBadgeIcon, { backgroundColor: colors.expenseTint }]}>
+                    <Ionicons
+                      name={sourceWallet ? getCategoryIcon(sourceWallet.name, sourceWallet.icon) : 'arrow-up-circle-outline'}
+                      size={15}
+                      color={colors.expense}
+                    />
+                  </View>
+                  <View style={styles.impactWalletTextCol}>
+                    <View style={styles.impactNameBadgeRow}>
+                      <Text style={styles.impactWalletName} numberOfLines={1}>
+                        Dompet {sourceWallet?.name ?? 'Sumber'}
+                      </Text>
+                      <View style={styles.sourceRoleBadge}>
+                        <Text style={styles.sourceRoleBadgeText}>Sumber</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.impactOldBal} numberOfLines={1}>
+                      Semula: {formatRupiah(sourceBalance)}
+                      {amountNum > 0 ? (
+                        <Text style={{ color: colors.expense, fontWeight: '700' }}> (-{formatRupiah(amountNum)})</Text>
+                      ) : null}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.impactItemRight}>
+                  <Text style={styles.impactResultLabel}>Saldo Baru</Text>
+                  <Text
+                    style={[
+                      styles.impactNewBal,
+                      { color: simulatedSourceAfter < 0 ? colors.expense : colors.ink },
+                    ]}
+                    numberOfLines={1}
+                  >
                     {simulatedSourceAfter < 0
-                      ? `Defisit ${formatRupiah(Math.abs(simulatedSourceAfter))}`
+                      ? `Minus ${formatRupiah(Math.abs(simulatedSourceAfter))}`
                       : formatRupiah(simulatedSourceAfter)}
                   </Text>
-                </Text>
-              </View>
-
-              {/* Target Simulation */}
-              <View style={styles.impactRow}>
-                <Text style={styles.impactLabel} numberOfLines={1}>
-                  Dompet {targetWallet?.name ?? 'Tujuan'}:
-                </Text>
-                <Text style={styles.impactValues}>
-                  {formatRupiah(targetBalance)} →{' '}
-                  <Text style={{ fontWeight: '800', color: colors.income }}>
-                    {formatRupiah(simulatedTargetAfter)}
-                  </Text>
-                </Text>
+                </View>
               </View>
 
               <View style={styles.divider} />
 
-              {/* Main Wallet (Dompet Utama) Status */}
-              <View style={styles.impactRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Ionicons name="shield-checkmark" size={14} color={colors.income} />
-                  <Text style={[styles.impactLabel, { fontWeight: '700', color: colors.ink }]}>Dompet Utama:</Text>
+              {/* 2. Target Simulation */}
+              <View style={styles.impactItem}>
+                <View style={styles.impactItemLeft}>
+                  <View style={[styles.impactBadgeIcon, { backgroundColor: colors.incomeTint }]}>
+                    <Ionicons
+                      name={targetWallet ? getCategoryIcon(targetWallet.name, targetWallet.icon) : 'arrow-down-circle-outline'}
+                      size={15}
+                      color={colors.income}
+                    />
+                  </View>
+                  <View style={styles.impactWalletTextCol}>
+                    <View style={styles.impactNameBadgeRow}>
+                      <Text style={styles.impactWalletName} numberOfLines={1}>
+                        Dompet {targetWallet?.name ?? 'Tujuan'}
+                      </Text>
+                      <View style={styles.targetRoleBadge}>
+                        <Text style={styles.targetRoleBadgeText}>Tujuan</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.impactOldBal} numberOfLines={1}>
+                      Semula: {formatRupiah(targetBalance)}
+                      {amountNum > 0 ? (
+                        <Text style={{ color: colors.income, fontWeight: '700' }}> (+{formatRupiah(amountNum)})</Text>
+                      ) : null}
+                    </Text>
+                  </View>
                 </View>
-                <Text style={[styles.impactValues, { fontWeight: '800', color: colors.income }]}>
-                  {formatRupiah(mainBalance)} (Tetap Utuh)
-                </Text>
+
+                <View style={styles.impactItemRight}>
+                  <Text style={styles.impactResultLabel}>Saldo Baru</Text>
+                  <Text style={[styles.impactNewBal, { color: colors.income }]} numberOfLines={1}>
+                    {formatRupiah(simulatedTargetAfter)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              {/* 3. Main Wallet (Dompet Utama) Status */}
+              <View style={styles.impactMainItem}>
+                <View style={styles.impactItemLeft}>
+                  <View style={[styles.impactBadgeIcon, { backgroundColor: colors.sky100 }]}>
+                    <Ionicons name="shield-checkmark" size={15} color={colors.primary} />
+                  </View>
+                  <View style={styles.impactWalletTextCol}>
+                    <View style={styles.impactNameBadgeRow}>
+                      <Text style={[styles.impactWalletName, { fontWeight: '800' }]} numberOfLines={1}>
+                        Dompet Utama
+                      </Text>
+                      <View style={styles.utuhBadge}>
+                        <Ionicons name="checkmark-circle" size={11} color={colors.income} />
+                        <Text style={styles.utuhBadgeText}>Tetap Utuh</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.impactOldBal} numberOfLines={1}>
+                      Total kas akun tidak bertambah / berkurang
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.impactItemRight}>
+                  <Text style={styles.impactResultLabel}>Total Kas</Text>
+                  <Text style={[styles.impactNewBal, { color: colors.income, fontWeight: '800' }]} numberOfLines={1}>
+                    {formatRupiah(mainBalance)}
+                  </Text>
+                </View>
               </View>
             </View>
 
             <View style={styles.impactFooterNote}>
               <Text style={styles.impactFooterText}>
-                Transfer internal ini tidak menambah maupun mengurangi total saldo di Dompet Utama.
+                Transfer internal ini murni menggeser alokasi saldo pos dan tidak mengubah total kas di Dompet Utama.
               </Text>
             </View>
           </View>
@@ -761,35 +839,138 @@ const styles = StyleSheet.create({
   impactTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: spacing.sm,
+    gap: 8,
+    marginBottom: spacing.md,
+  },
+  impactTitleIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.sky100,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   impactTitle: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     color: colors.primary,
   },
-  impactDetails: {
-    gap: 6,
+  impactSubtitle: {
+    fontSize: 11,
+    color: colors.inkTertiary,
+    marginTop: 1,
   },
-  impactRow: {
+  impactDetails: {
+    gap: 8,
+  },
+  impactItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 2,
   },
-  impactLabel: {
-    fontSize: 12,
-    color: colors.inkSecondary,
+  impactMainItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.canvas,
+    borderRadius: radius.control,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginTop: 2,
+  },
+  impactItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    marginRight: spacing.xs,
+  },
+  impactBadgeIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  impactWalletTextCol: {
     flex: 1,
   },
-  impactValues: {
+  impactNameBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  impactWalletName: {
     fontSize: 12,
+    fontWeight: '700',
     color: colors.ink,
+    flexShrink: 1,
+  },
+  sourceRoleBadge: {
+    backgroundColor: colors.expenseTint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.chip,
+  },
+  sourceRoleBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.expense,
+  },
+  targetRoleBadge: {
+    backgroundColor: colors.incomeTint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.chip,
+  },
+  targetRoleBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.income,
+  },
+  utuhBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.incomeTint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.chip,
+  },
+  utuhBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.income,
+  },
+  impactOldBal: {
+    fontSize: 10,
+    color: colors.inkSecondary,
+    marginTop: 1,
+  },
+  impactItemRight: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    minWidth: 85,
+  },
+  impactResultLabel: {
+    fontSize: 9,
+    color: colors.inkTertiary,
+    fontWeight: '600',
+    marginBottom: 1,
+    textAlign: 'right',
+  },
+  impactNewBal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.ink,
+    textAlign: 'right',
   },
   divider: {
     height: 1,
     backgroundColor: colors.line,
-    marginVertical: 4,
+    marginVertical: 2,
   },
   impactFooterNote: {
     backgroundColor: colors.canvas,
