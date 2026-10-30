@@ -1,3 +1,4 @@
+import '../utils/zod-compat';
 import { z } from 'zod';
 
 export const transactionSchema = z.object({
