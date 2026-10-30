@@ -67,10 +67,42 @@ export const shadow = {
   },
 };
 
-type IconName = keyof typeof Ionicons.glyphMap;
+export type WalletIconName = keyof typeof Ionicons.glyphMap;
+
+// Curated list of distinct icons for customizable wallets/categories
+export const WALLET_AVAILABLE_ICONS: WalletIconName[] = [
+  'wallet',
+  'cart',
+  'fast-food',
+  'cafe',
+  'restaurant',
+  'car',
+  'bus',
+  'airplane',
+  'home',
+  'receipt',
+  'gift',
+  'heart',
+  'game-controller',
+  'film',
+  'musical-notes',
+  'fitness',
+  'medkit',
+  'school',
+  'book',
+  'paw',
+  'shirt',
+  'sparkles',
+  'trending-up',
+  'briefcase',
+  'laptop',
+  'phone-portrait',
+  'bag-handle',
+  'pricetag',
+];
 
 // Icon per default category (PRD §15). Fallback: pricetag
-const CATEGORY_ICONS: Record<string, IconName> = {
+const CATEGORY_ICONS: Record<string, WalletIconName> = {
   salary: 'briefcase',
   freelance: 'laptop',
   business: 'storefront',
@@ -89,7 +121,10 @@ const CATEGORY_ICONS: Record<string, IconName> = {
   other: 'ellipsis-horizontal-circle',
 };
 
-export function getCategoryIcon(name?: string): IconName {
+export function getCategoryIcon(name?: string, icon?: string | null): WalletIconName {
+  if (icon && typeof icon === 'string' && icon.trim()) {
+    return icon as WalletIconName;
+  }
   if (!name) return 'pricetag';
   return CATEGORY_ICONS[name.toLowerCase()] ?? 'pricetag';
 }
