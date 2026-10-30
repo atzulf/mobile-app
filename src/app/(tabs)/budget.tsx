@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,14 +18,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Budget, BudgetService } from '../../services/budget.service';
 import { Category, CategoryService } from '../../services/category.service';
 import { Transaction, TransactionService } from '../../services/transaction.service';
-import { colors, getCategoryIcon, radius, shadow, spacing } from '../../theme';
+import { NotificationService } from '../../services/notification.service';
+import { colors, getCategoryIcon, radius, shadow, spacing, WALLET_AVAILABLE_ICONS, WalletIconName } from '../../theme';
 import {
   confirmAction,
   formatMonth,
   formatRupiah,
   formatThousands,
   getErrorMessage,
-  getMonthRange,
 } from '../../utils/format';
 import { EmptyState, ErrorState, Loading } from '../../components/ui/common';
 
@@ -43,6 +43,8 @@ export default function DompetScreen() {
   // Create Custom Wallet Modal state
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newWalletName, setNewWalletName] = useState('');
+  const [newWalletIcon, setNewWalletIcon] = useState<WalletIconName>('wallet');
+  const [hasManuallyPickedIcon, setHasManuallyPickedIcon] = useState(false);
   const [newWalletBudget, setNewWalletBudget] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export default function DompetScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingWalletId, setEditingWalletId] = useState<string | null>(null);
   const [editingWalletName, setEditingWalletName] = useState('');
+  const [editingWalletIcon, setEditingWalletIcon] = useState<WalletIconName>('wallet');
   const [editingWalletBudget, setEditingWalletBudget] = useState('');
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -62,15 +65,15 @@ export default function DompetScreen() {
       const m = date.getMonth() + 1;
       const y = date.getFullYear();
 
-      const [budgetData, catData, txData] = await Promise.all([
+      const [budgetData, catData, allTxData] = await Promise.all([
         BudgetService.getAll(m, y).catch(() => [] as Budget[]),
         CategoryService.getAll().catch(() => [] as Category[]),
-        TransactionService.getAll(getMonthRange(date)).catch(() => [] as Transaction[]),
+        TransactionService.getAll().catch(() => [] as Transaction[]),
       ]);
 
       setBudgets(budgetData);
       setCategories(catData);
-      setTransactions(txData);
+      setTransactions(allTxData);
     } catch (e) {
       setError(getErrorMessage(e));
     } finally {
@@ -90,33 +93,55 @@ export default function DompetScreen() {
     setDate((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
   };
 
+  // Transactions belonging to the currently selected month
+  const monthTransactions = useMemo(() => {
+    const selMonth = date.getMonth();
+    const selYear = date.getFullYear();
+    return transactions.filter((t) => {
+      const d = new Date(t.transactionDate);
+      return d.getMonth() === selMonth && d.getFullYear() === selYear;
+    });
+  }, [transactions, date]);
+
   // Compute rich wallet details
   const wallets = useMemo(() => {
     return categories
       .map((cat) => {
-        const catTxs = transactions.filter((t) => t.categoryId === cat.id);
-        const catIncome = catTxs.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
-        const catExpense = catTxs.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
+        // Real cumulative cash balance for this wallet across all-time transactions
+        const catAllTxs = transactions.filter((t) => t.categoryId === cat.id);
+        const catAllIncome = catAllTxs.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
+        const catAllExpense = catAllTxs.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
+        // Monthly activity for the selected month to evaluate against budget ceiling
+        const catMonthTxs = monthTransactions.filter((t) => t.categoryId === cat.id);
+        const catMonthExpense = catMonthTxs.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
+        const catMonthIncome = catMonthTxs.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
+
         const catBudget = budgets.find((b) => b.categoryId === cat.id);
         const budgetAmount = catBudget?.amount ?? 0;
         const hasBudget = Boolean(catBudget && catBudget.amount > 0);
 
-        const sisa = hasBudget ? budgetAmount + catIncome - catExpense : catIncome - catExpense;
-        const ceiling = hasBudget ? budgetAmount + catIncome : catIncome;
-        const pctUsed = ceiling > 0 ? Math.min(100, Math.round((catExpense / ceiling) * 100)) : 0;
-        const isExceeded = ceiling > 0 ? catExpense > ceiling : catExpense > 0 && catIncome === 0;
-        const isWarning = ceiling > 0 && pctUsed >= 80 && !isExceeded;
+        // Saldo riil dompet: murni pemasukan dikurangi pengeluaran transaksi agar total uang tetap sama persis dengan Dompet Utama
+        const sisa = catAllIncome - catAllExpense;
+
+        const pctUsed = hasBudget && budgetAmount > 0
+          ? Math.min(100, Math.round((catMonthExpense / budgetAmount) * 100))
+          : 0;
+        const isExceeded = hasBudget ? catMonthExpense > budgetAmount : sisa < 0;
+        const isWarning = hasBudget ? pctUsed >= 80 && !isExceeded : false;
 
         return {
           id: cat.id,
           name: cat.name,
+          icon: cat.icon,
           hasBudget,
           budgetAmount,
           budgetId: catBudget?.id ?? null,
-          income: catIncome,
-          expense: catExpense,
+          income: catAllIncome,
+          expense: catAllExpense,
+          monthExpense: catMonthExpense,
+          monthIncome: catMonthIncome,
           sisa,
-          txCount: catTxs.length,
+          txCount: catAllTxs.length,
           pctUsed,
           isExceeded,
           isWarning,
@@ -127,7 +152,7 @@ export default function DompetScreen() {
         if (!a.hasBudget && b.hasBudget) return 1;
         return (b.expense + b.income) - (a.expense + a.income);
       });
-  }, [categories, transactions, budgets]);
+  }, [categories, transactions, monthTransactions, budgets]);
 
   const filteredWallets = useMemo(() => {
     if (!searchQuery.trim()) return wallets;
@@ -136,12 +161,34 @@ export default function DompetScreen() {
   }, [wallets, searchQuery]);
 
   // Overall totals across all wallets
-  const totalAllocated = useMemo(() => budgets.reduce((s, b) => s + b.amount, 0), [budgets]);
-  const totalSpentAll = useMemo(
-    () => transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0),
-    [transactions],
+  const totalWalletBalance = useMemo(
+    () => wallets.reduce((s, w) => s + w.sisa, 0),
+    [wallets],
   );
-  const totalRemaining = totalAllocated - totalSpentAll;
+  const totalSpentAll = useMemo(
+    () => monthTransactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0),
+    [monthTransactions],
+  );
+  const totalIncomeAll = useMemo(
+    () => monthTransactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0),
+    [monthTransactions],
+  );
+
+  // Evaluate budget threshold alerts for active wallets
+  useEffect(() => {
+    wallets.forEach((w) => {
+      if (w.hasBudget && w.budgetAmount > 0) {
+        NotificationService.checkBudgetAlert({
+          categoryId: w.id,
+          categoryName: w.name,
+          budgetAmount: w.budgetAmount,
+          monthExpense: w.monthExpense,
+          month: date.getMonth() + 1,
+          year: date.getFullYear(),
+        }).catch(() => {});
+      }
+    });
+  }, [wallets, date]);
 
   // Handler: Create Custom Wallet
   const handleCreateWallet = async () => {
@@ -158,6 +205,7 @@ export default function DompetScreen() {
       const newCat = await CategoryService.create({
         name: cleanName,
         type: 'EXPENSE',
+        icon: newWalletIcon,
       });
 
       // 2. If budget ceiling specified, create the monthly budget
@@ -173,6 +221,8 @@ export default function DompetScreen() {
 
       setCreateModalVisible(false);
       setNewWalletName('');
+      setNewWalletIcon('wallet');
+      setHasManuallyPickedIcon(false);
       setNewWalletBudget('');
       setLoading(true);
       await loadData();
@@ -187,6 +237,7 @@ export default function DompetScreen() {
   const openEditWallet = (wallet: (typeof wallets)[0]) => {
     setEditingWalletId(wallet.id);
     setEditingWalletName(wallet.name);
+    setEditingWalletIcon(getCategoryIcon(wallet.name, wallet.icon));
     setEditingBudgetId(wallet.budgetId);
     setEditingWalletBudget(wallet.hasBudget ? String(Math.round(wallet.budgetAmount)) : '');
     setEditError(null);
@@ -205,8 +256,11 @@ export default function DompetScreen() {
     setEditSubmitting(true);
     setEditError(null);
     try {
-      // Update custom name
-      await CategoryService.update(editingWalletId, { name: cleanName });
+      // Update custom name and icon
+      await CategoryService.update(editingWalletId, {
+        name: cleanName,
+        icon: editingWalletIcon,
+      });
 
       // Update or create budget ceiling
       const cleanBudget = Number(editingWalletBudget.replace(/\D/g, ''));
@@ -290,9 +344,9 @@ export default function DompetScreen() {
         <View style={styles.helperBanner}>
           <Ionicons name="wallet" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.helperTitle}>Pos Dompet Kecil</Text>
+            <Text style={styles.helperTitle}>Pos Dompet Serbaguna</Text>
             <Text style={styles.helperText}>
-              Bagi uangmu ke dompet kecil dengan plafon bulanan. Belanja dari dompet mana pun otomatis memotong Dompet Utama.
+              Kelola pos uangmu ke dalam dompet serbaguna. Setiap transaksi otomatis tersinkronisasi dengan Dompet Utama.
             </Text>
           </View>
         </View>
@@ -300,11 +354,18 @@ export default function DompetScreen() {
         {/* Global Summary Card */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryCol}>
-            <Text style={styles.summaryLabel}>Total Plafon</Text>
-            <Text style={[styles.summaryVal, { color: colors.blue500 }]}>
-              {formatRupiah(totalAllocated)}
+            <Text style={styles.summaryLabel}>Total Saldo Dompet</Text>
+            <Text
+              style={[
+                styles.summaryVal,
+                { color: totalWalletBalance >= 0 ? colors.ink : colors.expense },
+              ]}
+            >
+              {totalWalletBalance < 0
+                ? `Defisit ${formatRupiah(Math.abs(totalWalletBalance))}`
+                : formatRupiah(totalWalletBalance)}
             </Text>
-            <Text style={styles.summarySub}>{budgets.length} dompet berplafon</Text>
+            <Text style={styles.summarySub}>{wallets.length} dompet aktif</Text>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryCol}>
@@ -312,31 +373,26 @@ export default function DompetScreen() {
             <Text style={[styles.summaryVal, { color: colors.expense }]}>
               {formatRupiah(totalSpentAll)}
             </Text>
-            <Text style={styles.summarySub}>Bulan {formatMonth(date)}</Text>
+            <Text style={styles.summarySub}>Uang keluar</Text>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryCol}>
-            <Text style={styles.summaryLabel}>Sisa Dana</Text>
-            <Text
-              style={[
-                styles.summaryVal,
-                { color: totalRemaining >= 0 ? colors.income : colors.expense },
-              ]}
-            >
-              {formatRupiah(totalRemaining)}
+            <Text style={styles.summaryLabel}>Total Uang Masuk</Text>
+            <Text style={[styles.summaryVal, { color: colors.income }]}>
+              {formatRupiah(totalIncomeAll)}
             </Text>
-            <Text style={styles.summarySub}>{totalRemaining >= 0 ? 'Tersedia' : 'Overbudget'}</Text>
+            <Text style={styles.summarySub}>Uang masuk</Text>
           </View>
         </View>
 
-        {/* Action Header: Search & Create Wallet Button */}
+        {/* Action Header: Search, Transfer & Create Wallet Button */}
         <View style={styles.actionHeaderRow}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={16} color={colors.inkTertiary} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Cari nama dompet..."
+              placeholder="Cari dompet..."
               placeholderTextColor={colors.inkTertiary}
               style={styles.searchInput}
             />
@@ -346,6 +402,16 @@ export default function DompetScreen() {
               </Pressable>
             ) : null}
           </View>
+
+          <Pressable
+            onPress={() => router.push('/transfer')}
+            style={({ pressed }) => [styles.transferHeaderBtn, pressed && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Transfer saldo antar dompet"
+          >
+            <Ionicons name="swap-horizontal" size={15} color={colors.blue500} />
+            <Text style={styles.transferHeaderBtnText}>Transfer</Text>
+          </Pressable>
 
           <Pressable
             onPress={() => {
@@ -359,7 +425,7 @@ export default function DompetScreen() {
             accessibilityLabel="Buat dompet kecil baru"
           >
             <Ionicons name="add" size={18} color={colors.white} />
-            <Text style={styles.createWalletBtnText}>Buat Dompet</Text>
+            <Text style={styles.createWalletBtnText}>Buat</Text>
           </Pressable>
         </View>
 
@@ -379,7 +445,7 @@ export default function DompetScreen() {
           />
         ) : (
           filteredWallets.map((wallet) => {
-            const statusColor = wallet.isExceeded
+            const statusColor = (wallet.isExceeded || wallet.sisa < 0)
               ? colors.expense
               : wallet.isWarning
               ? colors.warning
@@ -387,7 +453,7 @@ export default function DompetScreen() {
               ? colors.income
               : colors.inkTertiary;
 
-            const statusText = wallet.isExceeded
+            const statusText = (wallet.isExceeded || wallet.sisa < 0)
               ? 'Melebihi Plafon'
               : wallet.isWarning
               ? 'Mendekati Batas'
@@ -396,13 +462,29 @@ export default function DompetScreen() {
               : 'Belum Ada Plafon';
 
             return (
-              <View key={wallet.id} style={styles.walletCard}>
+              <Pressable
+                key={wallet.id}
+                style={({ pressed }) => [styles.walletCard, pressed && { opacity: 0.95 }]}
+                onPress={() =>
+                  router.push({
+                    pathname: '/category-detail',
+                    params: {
+                      categoryId: wallet.id,
+                      categoryName: wallet.name,
+                      month: String(date.getMonth() + 1),
+                      year: String(date.getFullYear()),
+                    },
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Buka rincian detail dompet ${wallet.name}`}
+              >
                 {/* Header row */}
                 <View style={styles.cardHeader}>
                   <View style={styles.cardHeaderLeft}>
                     <View style={[styles.cardIconWrap, { backgroundColor: statusColor + '18' }]}>
                       <Ionicons
-                        name={getCategoryIcon(wallet.name)}
+                        name={getCategoryIcon(wallet.name, wallet.icon)}
                         size={18}
                         color={statusColor === colors.inkTertiary ? colors.primary : statusColor}
                       />
@@ -418,29 +500,53 @@ export default function DompetScreen() {
                     </View>
                   </View>
 
-                  <Pressable
-                    onPress={() => openEditWallet(wallet)}
-                    style={styles.cardEditBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ubah nama dompet ${wallet.name}`}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="ellipsis-horizontal" size={18} color={colors.inkSecondary} />
-                  </Pressable>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        openEditWallet(wallet);
+                      }}
+                      style={styles.cardEditBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Ubah nama dompet ${wallet.name}`}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={18} color={colors.inkSecondary} />
+                    </Pressable>
+                    <Ionicons name="chevron-forward" size={16} color={colors.inkTertiary} />
+                  </View>
                 </View>
 
                 {/* Sisa Boleh Dipakai */}
                 <View style={styles.cardBalanceRow}>
-                  <View>
-                    <Text style={styles.cardBalanceLabel}>Sisa Boleh Dibelanjakan</Text>
-                    <Text
-                      style={[
-                        styles.cardBalanceValue,
-                        { color: wallet.sisa >= 0 ? colors.ink : colors.expense },
-                      ]}
-                    >
-                      {formatRupiah(wallet.sisa)}
+                  <View style={{ flex: 1, paddingRight: spacing.xs }}>
+                    <Text style={styles.cardBalanceLabel}>
+                      {wallet.hasBudget ? 'Sisa Plafon Bulan Ini' : 'Sisa Saldo Dompet'}
                     </Text>
+                    {wallet.isExceeded || (!wallet.hasBudget && wallet.sisa < 0) ? (
+                      <View>
+                        <Text
+                          style={[
+                            styles.cardBalanceValue,
+                            { color: colors.expense, fontSize: 15, lineHeight: 20 },
+                          ]}
+                        >
+                          Melebihi budget target awal
+                        </Text>
+                        <Text style={{ fontSize: 12, color: colors.expense, fontWeight: '600', marginTop: 2 }}>
+                          Lebih {formatRupiah(wallet.hasBudget ? Math.max(0, wallet.monthExpense - wallet.budgetAmount) : Math.abs(wallet.sisa))}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.cardBalanceValue,
+                          { color: colors.ink },
+                        ]}
+                      >
+                        {formatRupiah(wallet.hasBudget ? Math.max(0, wallet.budgetAmount - wallet.monthExpense) : wallet.sisa)}
+                      </Text>
+                    )}
                   </View>
                   <View
                     style={[
@@ -470,20 +576,23 @@ export default function DompetScreen() {
                         Plafon: {formatRupiah(wallet.budgetAmount)}
                       </Text>
                       <Text style={styles.cardProgressText}>
-                        Terpakai: {formatRupiah(wallet.expense)} ({wallet.pctUsed}%)
+                        Terpakai: {formatRupiah(wallet.monthExpense)} ({wallet.pctUsed}%)
                       </Text>
                     </View>
                   </View>
                 ) : (
                   <Pressable
-                    onPress={() => openEditWallet(wallet)}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      openEditWallet(wallet);
+                    }}
                     style={styles.setBudgetPromptBtn}
                     accessibilityRole="button"
                     accessibilityLabel="Pasang plafon anggaran"
                   >
                     <Ionicons name="add-circle-outline" size={14} color={colors.blue500} />
                     <Text style={styles.setBudgetPromptText}>
-                      Pasang plafon anggaran bulanan dompet ini
+                      Plafon: Rp 0 (Bebas) • Pasang target anggaran
                     </Text>
                   </Pressable>
                 )}
@@ -496,12 +605,13 @@ export default function DompetScreen() {
                       styles.cardSpendBtn,
                       pressed && { opacity: 0.8 },
                     ]}
-                    onPress={() =>
+                    onPress={(e) => {
+                      e.stopPropagation?.();
                       router.push({
                         pathname: '/transaction-form',
                         params: { categoryId: wallet.id, type: 'EXPENSE' },
-                      })
-                    }
+                      });
+                    }}
                     accessibilityRole="button"
                     accessibilityLabel={`Catat belanja dompet ${wallet.name}`}
                   >
@@ -515,12 +625,13 @@ export default function DompetScreen() {
                       styles.cardTopupBtn,
                       pressed && { opacity: 0.8 },
                     ]}
-                    onPress={() =>
+                    onPress={(e) => {
+                      e.stopPropagation?.();
                       router.push({
                         pathname: '/transaction-form',
                         params: { categoryId: wallet.id, type: 'INCOME' },
-                      })
-                    }
+                      });
+                    }}
                     accessibilityRole="button"
                     accessibilityLabel={`Isi saldo dompet ${wallet.name}`}
                   >
@@ -531,34 +642,30 @@ export default function DompetScreen() {
                   <Pressable
                     style={({ pressed }) => [
                       styles.cardActionBtn,
-                      styles.cardDetailBtn,
+                      styles.cardTransferBtn,
                       pressed && { opacity: 0.8 },
                     ]}
-                    onPress={() =>
+                    onPress={(e) => {
+                      e.stopPropagation?.();
                       router.push({
-                        pathname: '/category-detail',
-                        params: {
-                          categoryId: wallet.id,
-                          categoryName: wallet.name,
-                          month: String(date.getMonth() + 1),
-                          year: String(date.getFullYear()),
-                        },
-                      })
-                    }
+                        pathname: '/transfer',
+                        params: { sourceId: wallet.id },
+                      });
+                    }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Buka rincian buku kas dompet ${wallet.name}`}
+                    accessibilityLabel={`Pindah saldo dari dompet ${wallet.name}`}
                   >
-                    <Text style={styles.cardDetailText}>Rincian</Text>
-                    <Ionicons name="chevron-forward" size={13} color={colors.primary} />
+                    <Ionicons name="swap-horizontal" size={14} color={colors.blue500} />
+                    <Text style={styles.cardTransferText}>Pindah</Text>
                   </Pressable>
                 </View>
-              </View>
+              </Pressable>
             );
           })
         )}
       </ScrollView>
 
-      {/* Modal: Buat Dompet Baru (Custom Name) */}
+      {/* Modal: Buat Dompet Baru (Custom Name & Icon) */}
       <Modal
         visible={createModalVisible}
         transparent
@@ -573,11 +680,11 @@ export default function DompetScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <View style={styles.modalIconWrap}>
-                <Ionicons name="wallet" size={22} color={colors.primary} />
+                <Ionicons name={newWalletIcon} size={22} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>Buat Dompet Baru</Text>
-                <Text style={styles.modalSubtitle}>Kustomisasi nama pos dompet sesukamu</Text>
+                <Text style={styles.modalSubtitle}>Kustomisasi nama dan ikon pos dompet sesukamu</Text>
               </View>
               <Pressable
                 onPress={() => setCreateModalVisible(false)}
@@ -600,12 +707,61 @@ export default function DompetScreen() {
             <Text style={styles.inputLabel}>Nama Dompet Kecil *</Text>
             <TextInput
               value={newWalletName}
-              onChangeText={setNewWalletName}
+              onChangeText={(text) => {
+                setNewWalletName(text);
+                if (!hasManuallyPickedIcon && text.trim().length > 0) {
+                  const autoIcon = getCategoryIcon(text);
+                  if (autoIcon && autoIcon !== 'pricetag') {
+                    setNewWalletIcon(autoIcon);
+                  }
+                }
+              }}
               placeholder="Contoh: Skincare, Kucing, Hobi, Gadget, Liburan"
               placeholderTextColor={colors.inkTertiary}
               style={styles.modalTextInput}
               autoFocus
             />
+
+            {/* Icon Picker Section */}
+            <View style={styles.iconSectionHeader}>
+              <Text style={styles.inputLabel}>Pilih Ikon Dompet</Text>
+              <View style={styles.iconSelectedPill}>
+                <Ionicons name={newWalletIcon} size={13} color={colors.primary} />
+                <Text style={styles.iconSelectedText}>{newWalletIcon}</Text>
+              </View>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.iconScrollRow}
+              style={styles.iconScrollView}
+            >
+              {WALLET_AVAILABLE_ICONS.map((icon) => {
+                const isSelected = newWalletIcon === icon;
+                return (
+                  <Pressable
+                    key={icon}
+                    onPress={() => {
+                      setNewWalletIcon(icon);
+                      setHasManuallyPickedIcon(true);
+                    }}
+                    style={[
+                      styles.iconChip,
+                      isSelected && styles.iconChipSelected,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih ikon ${icon}`}
+                    hitSlop={4}
+                  >
+                    <Ionicons
+                      name={icon}
+                      size={20}
+                      color={isSelected ? colors.white : colors.inkSecondary}
+                    />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
             {/* Optional Budget Ceiling Input */}
             <Text style={styles.inputLabel}>Plafon Anggaran Bulanan (Opsional)</Text>
@@ -663,11 +819,11 @@ export default function DompetScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <View style={styles.modalIconWrap}>
-                <Ionicons name="pencil" size={20} color={colors.primary} />
+                <Ionicons name={editingWalletIcon} size={20} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>Kelola Dompet</Text>
-                <Text style={styles.modalSubtitle}>Ubah nama atau plafon dompet</Text>
+                <Text style={styles.modalSubtitle}>Ubah nama, ikon, atau plafon dompet</Text>
               </View>
               <Pressable
                 onPress={() => setEditModalVisible(false)}
@@ -696,6 +852,44 @@ export default function DompetScreen() {
               style={styles.modalTextInput}
             />
 
+            {/* Icon Picker Section */}
+            <View style={styles.iconSectionHeader}>
+              <Text style={styles.inputLabel}>Pilih Ikon Dompet</Text>
+              <View style={styles.iconSelectedPill}>
+                <Ionicons name={editingWalletIcon} size={13} color={colors.primary} />
+                <Text style={styles.iconSelectedText}>{editingWalletIcon}</Text>
+              </View>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.iconScrollRow}
+              style={styles.iconScrollView}
+            >
+              {WALLET_AVAILABLE_ICONS.map((icon) => {
+                const isSelected = editingWalletIcon === icon;
+                return (
+                  <Pressable
+                    key={icon}
+                    onPress={() => setEditingWalletIcon(icon)}
+                    style={[
+                      styles.iconChip,
+                      isSelected && styles.iconChipSelected,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih ikon ${icon}`}
+                    hitSlop={4}
+                  >
+                    <Ionicons
+                      name={icon}
+                      size={20}
+                      color={isSelected ? colors.white : colors.inkSecondary}
+                    />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
             {/* Budget Ceiling Input */}
             <Text style={styles.inputLabel}>Plafon Anggaran Bulanan (Rp)</Text>
             <View style={styles.amountInputWrap}>
@@ -709,6 +903,22 @@ export default function DompetScreen() {
                 style={styles.modalAmountInput}
               />
             </View>
+
+            <Text style={styles.budgetHintText}>
+              Bisa diatur bebas atau diset Rp 0. Ketik 0 atau kosongkan untuk menghilangkan plafon dompet ini.
+            </Text>
+
+            {editingWalletBudget && editingWalletBudget !== '0' ? (
+              <Pressable
+                onPress={() => setEditingWalletBudget('0')}
+                style={styles.zeroPillBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Nolkan plafon ke 0"
+              >
+                <Ionicons name="refresh-outline" size={13} color={colors.blue500} />
+                <Text style={styles.zeroPillText}>Nolkan Plafon (Rp 0)</Text>
+              </Pressable>
+            ) : null}
 
             <View style={styles.modalButtonsRow}>
               <Pressable
@@ -874,6 +1084,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.white,
   },
+  transferHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.blue500,
+    height: 44,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.control,
+  },
+  transferHeaderBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.blue500,
+  },
   walletCard: {
     backgroundColor: colors.white,
     borderRadius: radius.card,
@@ -1018,13 +1244,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.income,
   },
-  cardDetailBtn: {
-    backgroundColor: colors.primarySoft,
+  cardTransferBtn: {
+    backgroundColor: colors.sky100,
   },
-  cardDetailText: {
+  cardTransferText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.blue500,
   },
   modalOverlay: {
     flex: 1,
@@ -1044,6 +1270,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     width: '90%',
     maxWidth: 420,
+    maxHeight: '90%',
     padding: spacing.xl,
     ...shadow.hero,
   },
@@ -1103,6 +1330,50 @@ const styles = StyleSheet.create({
     height: 48,
     marginBottom: spacing.md,
   },
+  iconSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  iconSelectedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.sky100,
+    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.chip,
+  },
+  iconSelectedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  iconScrollView: {
+    marginBottom: spacing.md,
+  },
+  iconScrollRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  iconChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    ...shadow.card,
+  },
   amountInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1126,6 +1397,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.ink,
     height: '100%',
+  },
+  budgetHintText: {
+    fontSize: 12,
+    color: colors.inkSecondary,
+    lineHeight: 16,
+    marginTop: -8,
+    marginBottom: spacing.sm,
+  },
+  zeroPillBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.sky100,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.chip,
+    marginBottom: spacing.md,
+  },
+  zeroPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.blue500,
   },
   modalButtonsRow: {
     flexDirection: 'row',
