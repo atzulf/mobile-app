@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Category, CategoryService } from '../../services/category.service';
 import { Transaction, TransactionService } from '../../services/transaction.service';
 import { Budget, BudgetService } from '../../services/budget.service';
+import { NotificationService } from '../../services/notification.service';
 import { useUserName } from '../../services/profile.service';
 import { colors, getCategoryIcon, radius, spacing, shadow } from '../../theme';
 import { confirmAction, getErrorMessage, getMonthRange } from '../../utils/format';
@@ -249,6 +250,113 @@ export default function SettingsScreen() {
             >
               <Text style={styles.togglePillText}>{startOfWeek}</Text>
               <Ionicons name="swap-horizontal" size={13} color={colors.primary} />
+            </Pressable>
+          </View>
+        </View>
+      </View>
+
+      {/* 4. Notifikasi Kuota Anggaran & Pengingat Pintar */}
+      <View style={styles.sectionContainer}>
+        <Text style={styles.sectionTitle}>Notifikasi & Pengingat Pintar</Text>
+        <Text style={styles.sectionSubtitle}>
+          Peringatan otomatis langsung ke ponsel saat mendekati batas anggaran atau saldo menipis
+        </Text>
+
+        <View style={styles.settingsGroupCard}>
+          {/* Item 1: Peringatan Kuota Plafon */}
+          <View style={styles.settingItemRow}>
+            <View style={styles.settingIconWrap}>
+              <Ionicons name="pie-chart-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingItemTitle}>Peringatan Kuota Plafon</Text>
+              <Text style={styles.settingItemSubtitle}>Pemberitahuan saat belanja 80% & 100% plafon</Text>
+            </View>
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>Aktif</Text>
+            </View>
+          </View>
+
+          <View style={styles.settingItemDivider} />
+
+          {/* Item 2: Peringatan Saldo Menipis */}
+          <View style={styles.settingItemRow}>
+            <View style={styles.settingIconWrap}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.warning} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingItemTitle}>Peringatan Saldo Menipis</Text>
+              <Text style={styles.settingItemSubtitle}>Pemberitahuan saat saldo kas dompet &le; Rp 50.000 atau minus</Text>
+            </View>
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>Aktif</Text>
+            </View>
+          </View>
+
+          <View style={styles.settingItemDivider} />
+
+          {/* Item 3: Batas Belanja Harian */}
+          <View style={styles.settingItemRow}>
+            <View style={styles.settingIconWrap}>
+              <Ionicons name="flash-outline" size={18} color={colors.blue500} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingItemTitle}>Batas Belanja Harian</Text>
+              <Text style={styles.settingItemSubtitle}>Deteksi belanja hari ini melebihi rekomendasi harian</Text>
+            </View>
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>Aktif</Text>
+            </View>
+          </View>
+
+          <View style={styles.settingItemDivider} />
+
+          {/* Interactive Test Notifications Header */}
+          <View style={{ marginTop: 6, marginBottom: 8 }}>
+            <Text style={styles.testSectionTitle}>Uji Coba Notifikasi ke Ponsel</Text>
+            <Text style={styles.testSectionSubtitle}>Ketuk tombol untuk menguji tampilan notifikasi di layar Anda</Text>
+          </View>
+
+          {/* 4 Test Buttons Row */}
+          <View style={styles.testButtonsGrid}>
+            <Pressable
+              onPress={() => NotificationService.sendTestAlert('budget_warning')}
+              style={[styles.testChipBtn, { borderColor: colors.warning }]}
+              accessibilityRole="button"
+              accessibilityLabel="Uji coba notifikasi waspada 80 persen"
+            >
+              <Ionicons name="warning-outline" size={13} color={colors.warning} />
+              <Text style={[styles.testChipText, { color: colors.warning }]}>Plafon 80%</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => NotificationService.sendTestAlert('budget_exceeded')}
+              style={[styles.testChipBtn, { borderColor: colors.expense }]}
+              accessibilityRole="button"
+              accessibilityLabel="Uji coba notifikasi plafon 100 persen"
+            >
+              <Ionicons name="alert-circle-outline" size={13} color={colors.expense} />
+              <Text style={[styles.testChipText, { color: colors.expense }]}>Plafon 100%</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => NotificationService.sendTestAlert('low_balance')}
+              style={[styles.testChipBtn, { borderColor: colors.danger }]}
+              accessibilityRole="button"
+              accessibilityLabel="Uji coba notifikasi saldo menipis"
+            >
+              <Ionicons name="wallet-outline" size={13} color={colors.danger} />
+              <Text style={[styles.testChipText, { color: colors.danger }]}>Saldo Tipis</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => NotificationService.sendTestAlert('daily_limit')}
+              style={[styles.testChipBtn, { borderColor: colors.blue500 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Uji coba notifikasi batas belanja harian"
+            >
+              <Ionicons name="flash-outline" size={13} color={colors.blue500} />
+              <Text style={[styles.testChipText, { color: colors.blue500 }]}>Batas Harian</Text>
             </Pressable>
           </View>
         </View>
@@ -651,6 +759,66 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.primary,
+  },
+  settingItemDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+  activeBadge: {
+    backgroundColor: colors.incomeTint,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.chip,
+  },
+  activeBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.income,
+  },
+  testNotifBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.blue500,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.chip,
+  },
+  testNotifBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  testSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  testSectionSubtitle: {
+    fontSize: 11,
+    color: colors.inkTertiary,
+    marginTop: 1,
+  },
+  testButtonsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: 4,
+  },
+  testChipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.chip,
+  },
+  testChipText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   // Dialog / Edit Name Modal
