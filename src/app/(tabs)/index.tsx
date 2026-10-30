@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,10 +7,11 @@ import { Transaction, TransactionService } from '../../services/transaction.serv
 import { Category, CategoryService } from '../../services/category.service';
 import { Budget, BudgetService } from '../../services/budget.service';
 import { useUserName } from '../../services/profile.service';
+import { usePacingConfig } from '../../services/pacing.service';
 import { TransactionItem } from '../../components/transaction-item';
 import { Chip, EmptyState, ErrorState, Fab, Loading } from '../../components/ui/common';
 import { colors, getCategoryIcon, radius, shadow, spacing } from '../../theme';
-import { formatRupiah, getErrorMessage, getPeriodRange, Period } from '../../utils/format';
+import { formatRupiah, formatThousands, getErrorMessage, getPeriodRange, Period, toYMD } from '../../utils/format';
 
 const PERIODS: { key: Period; label: string }[] = [
   { key: 'today', label: 'Hari Ini' },
@@ -31,6 +32,10 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [pacingConfig, setPacingConfig] = usePacingConfig();
+  const [showPacingModal, setShowPacingModal] = useState(false);
+  const [tempPacingMode, setTempPacingMode] = useState<'AUTO' | 'CUSTOM'>(pacingConfig.mode);
+  const [tempPacingAmount, setTempPacingAmount] = useState(String(pacingConfig.customDailyLimit));
 
   const loadData = useCallback(async () => {
     try {
@@ -62,6 +67,9 @@ export default function DashboardScreen() {
   const income = transactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
   const balance = income - expense;
+  const netFlow = income - expense;
+  const isSurplus = netFlow >= 0;
+  const savingsRate = income > 0 ? Math.max(0, Math.min(100, Math.round((netFlow / income) * 100))) : 0;
 
   // Dompet Kecil calculations per category
   const wallets = useMemo(() => {
@@ -110,6 +118,87 @@ export default function DashboardScreen() {
   const budgetedWalletsCount = useMemo(() => {
     return wallets.filter((w) => w.hasBudget).length;
   }, [wallets]);
+
+  // Daily Spending Pacing Data (Opsi 2 dengan konfigurasi)
+  const pacingData = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const currentDay = now.getDate();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const daysRemaining = Math.max(1, daysInMonth - currentDay + 1);
+
+    const todayYMD = toYMD(now);
+    const thisMonthExpense = transactions
+      .filter((t) => {
+        if (t.type !== 'EXPENSE') return false;
+        const d = new Date(t.transactionDate);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      })
+      .reduce((s, t) => s + t.amount, 0);
+
+    const todayExpense = transactions
+      .filter((t) => t.type === 'EXPENSE' && toYMD(new Date(t.transactionDate)) === todayYMD)
+      .reduce((s, t) => s + t.amount, 0);
+
+    const hasBudget = totalAllocated > 0;
+    const remainingBudget = Math.max(0, totalAllocated - thisMonthExpense);
+    const autoDailyQuota = hasBudget
+      ? Math.round(remainingBudget / daysRemaining)
+      : (currentDay > 0 ? Math.round(thisMonthExpense / currentDay) : 0);
+
+    const isCustom = pacingConfig.mode === 'CUSTOM';
+    const dailyQuota = isCustom && pacingConfig.customDailyLimit > 0
+      ? pacingConfig.customDailyLimit
+      : autoDailyQuota;
+
+    const isOverBudget = hasBudget && thisMonthExpense >= totalAllocated;
+    const isOverDailyLimit = dailyQuota > 0 && todayExpense > dailyQuota;
+
+    let statusText = 'Aman';
+    let statusColor = colors.income;
+    let statusBg = colors.incomeTint;
+
+    if (isOverBudget && !isCustom) {
+      statusText = 'Plafon Lewat';
+      statusColor = colors.expense;
+      statusBg = colors.expenseTint;
+    } else if (isOverDailyLimit) {
+      statusText = 'Perlu Rem';
+      statusColor = colors.warning;
+      statusBg = colors.expenseSoft;
+    } else if (isCustom) {
+      statusText = 'Target Kustom';
+      statusColor = colors.blue500;
+      statusBg = colors.sky100;
+    } else if (hasBudget) {
+      statusText = 'Terkendali';
+      statusColor = colors.income;
+      statusBg = colors.incomeTint;
+    } else {
+      statusText = 'Plafon Bebas';
+      statusColor = colors.blue500;
+      statusBg = colors.sky100;
+    }
+
+    const progressPct = dailyQuota > 0 ? Math.min(100, Math.round((todayExpense / dailyQuota) * 100)) : 0;
+
+    return {
+      hasBudget,
+      isCustom,
+      daysRemaining,
+      daysInMonth,
+      autoDailyQuota,
+      dailyQuota,
+      todayExpense,
+      isOverBudget,
+      isOverDailyLimit,
+      statusText,
+      statusColor,
+      statusBg,
+      progressPct,
+    };
+  }, [transactions, totalAllocated, pacingConfig]);
 
   const getPeriodDescription = () => {
     const now = new Date();
@@ -192,7 +281,126 @@ export default function DashboardScreen() {
               <View style={styles.divider} />
               <SummaryItem icon="arrow-up" label="Pengeluaran" value={expense} color={colors.expense} soft={colors.expenseSoft} isHidden={isBalanceHidden} />
             </View>
+
+            {/* Arus Kas Bersih (Surplus / Tabungan) */}
+            <View style={styles.netCashDivider} />
+            <View style={styles.netCashRow}>
+              <View style={styles.netCashLeft}>
+                <View style={styles.netCashTitleRow}>
+                  <Ionicons
+                    name={isSurplus ? 'trending-up' : 'trending-down'}
+                    size={13}
+                    color={isSurplus ? colors.income : colors.expense}
+                  />
+                  <Text style={styles.netCashTitle}>Arus Keuangan</Text>
+                  <View style={[styles.netCashBadge, { backgroundColor: isSurplus ? colors.incomeTint : colors.expenseTint }]}>
+                    <Text style={[styles.netCashBadgeText, { color: isSurplus ? colors.income : colors.expense }]}>
+                      {isSurplus ? 'Positif' : 'Negatif'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.netCashSub}>
+                  {income > 0 ? `${savingsRate}% dari pemasukan` : 'Belum ada catatan pemasukan'}
+                </Text>
+              </View>
+
+              <View style={styles.netCashRight}>
+                <Text
+                  style={[styles.netCashVal, { color: isSurplus ? colors.income : colors.expense }]}
+                  numberOfLines={1}
+                >
+                  {isBalanceHidden ? 'Rp ****' : (isSurplus ? `+${formatRupiah(netFlow)}` : `-Rp ${Math.abs(Math.round(netFlow)).toLocaleString('id-ID')}`)}
+                </Text>
+              </View>
+            </View>
+
+            {income > 0 && (
+              <View style={styles.netProgressBarBg}>
+                <View
+                  style={[
+                    styles.netProgressBarFill,
+                    {
+                      width: `${Math.min(100, Math.max(4, savingsRate))}%`,
+                      backgroundColor: isSurplus ? colors.income : colors.expense,
+                    },
+                  ]}
+                />
+              </View>
+            )}
           </View>
+        </View>
+
+        {/* Widget Pacing Belanja Harian (Option 2 dengan tombol Atur) */}
+        <View style={styles.pacingCard}>
+          <View style={styles.pacingHeader}>
+            <View style={styles.pacingHeaderLeft}>
+              <View style={[styles.pacingIconWrap, { backgroundColor: pacingData.statusBg }]}>
+                <Ionicons
+                  name={pacingData.isOverBudget ? 'alert-circle' : pacingData.isOverDailyLimit ? 'speedometer' : 'flash'}
+                  size={14}
+                  color={pacingData.statusColor}
+                />
+              </View>
+              <Text style={styles.pacingTitle}>Pacing Belanja Harian</Text>
+              <View style={[styles.pacingBadge, { backgroundColor: pacingData.statusBg }]}>
+                <Text style={[styles.pacingBadgeText, { color: pacingData.statusColor }]}>
+                  {pacingData.statusText}
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                setTempPacingMode(pacingConfig.mode);
+                setTempPacingAmount(String(pacingConfig.customDailyLimit));
+                setShowPacingModal(true);
+              }}
+              style={styles.pacingSettingBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Buka pengaturan pacing belanja harian"
+            >
+              <Ionicons name="options-outline" size={13} color={colors.primary} />
+              <Text style={styles.pacingSettingBtnText}>Atur</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.pacingBody}>
+            <View style={styles.pacingColLeft}>
+              <Text style={styles.pacingTargetVal}>
+                {formatRupiah(pacingData.dailyQuota)}
+                <Text style={styles.pacingTargetUnit}>/hari</Text>
+              </Text>
+              <Text style={styles.pacingSubText}>
+                {pacingData.isCustom
+                  ? `Batas Kustom • Sisa ${pacingData.daysRemaining} hari di bulan ini`
+                  : pacingData.hasBudget
+                  ? `Otomatis Plafon • Sisa ${pacingData.daysRemaining} hari di bulan ini`
+                  : 'Rata-rata pengeluaran harian bulan ini'}
+              </Text>
+            </View>
+
+            <View style={styles.pacingColRight}>
+              <Text style={styles.pacingTodayLabel}>Hari Ini:</Text>
+              <Text style={[styles.pacingTodayVal, { color: pacingData.isOverDailyLimit ? colors.expense : colors.ink }]}>
+                {formatRupiah(pacingData.todayExpense)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Progress bar pacing hari ini */}
+          {pacingData.dailyQuota > 0 && (
+            <View style={styles.pacingProgressBg}>
+              <View
+                style={[
+                  styles.pacingProgressFill,
+                  {
+                    width: `${Math.min(100, Math.max(4, pacingData.progressPct))}%`,
+                    backgroundColor: pacingData.statusColor,
+                  },
+                ]}
+              />
+            </View>
+          )}
         </View>
 
         {/* Period filter */}
@@ -252,7 +460,7 @@ export default function DashboardScreen() {
               >
                 {isBalanceHidden ? 'Rp ****' : formatRupiah(freeBalance)}
               </Text>
-              <Text style={styles.flowSub}>{freeBalance >= 0 ? 'Belum dibagi' : 'Defisit'}</Text>
+              <Text style={styles.flowSub}>{freeBalance >= 0 ? 'Belum dibagi' : 'Saldo Minus'}</Text>
             </View>
           </View>
         </View>
@@ -558,6 +766,128 @@ export default function DashboardScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Pengaturan Pacing Belanja Harian */}
+      <Modal
+        visible={showPacingModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPacingModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.dialogCard}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogIconWrap}>
+                <Ionicons name="speedometer-outline" size={22} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dialogTitle}>Atur Pacing Belanja</Text>
+                <Text style={styles.dialogSubtitle}>Tentukan batas rekomendasi belanja harianmu</Text>
+              </View>
+              <Pressable onPress={() => setShowPacingModal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.ink} />
+              </Pressable>
+            </View>
+
+            {/* Opsi 1: Otomatis */}
+            <Pressable
+              onPress={() => setTempPacingMode('AUTO')}
+              style={[
+                styles.pacingModeOption,
+                tempPacingMode === 'AUTO' && styles.pacingModeOptionActive,
+              ]}
+            >
+              <View style={[styles.pacingRadioCircle, tempPacingMode === 'AUTO' && styles.pacingRadioCircleActive]}>
+                {tempPacingMode === 'AUTO' && <View style={styles.pacingRadioInner} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.pacingModeTitle}>Otomatis (Berdasarkan Plafon)</Text>
+                  <View style={styles.pacingRecBadge}>
+                    <Text style={styles.pacingRecBadgeText}>Rekomendasi</Text>
+                  </View>
+                </View>
+                <Text style={styles.pacingModeDesc}>
+                  Dihitung dinamis: Sisa plafon dibagi sisa hari di bulan ini ({formatRupiah(pacingData.autoDailyQuota)}/hari).
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Opsi 2: Kustom Manual */}
+            <Pressable
+              onPress={() => setTempPacingMode('CUSTOM')}
+              style={[
+                styles.pacingModeOption,
+                tempPacingMode === 'CUSTOM' && styles.pacingModeOptionActive,
+              ]}
+            >
+              <View style={[styles.pacingRadioCircle, tempPacingMode === 'CUSTOM' && styles.pacingRadioCircleActive]}>
+                {tempPacingMode === 'CUSTOM' && <View style={styles.pacingRadioInner} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pacingModeTitle}>Kustom (Nominal Tetap Manual)</Text>
+                <Text style={styles.pacingModeDesc}>
+                  Tetapkan target batas belanja harian tetap sesuai kehendak Anda.
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Input Nominal bila Mode Kustom dipilih */}
+            {tempPacingMode === 'CUSTOM' && (
+              <View style={styles.pacingInputBoxWrap}>
+                <Text style={styles.pacingInputLabel}>Nominal Batas Belanja Harian</Text>
+                <View style={styles.pacingAmountRow}>
+                  <Text style={styles.pacingAmountPrefix}>Rp</Text>
+                  <TextInput
+                    value={formatThousands(tempPacingAmount)}
+                    onChangeText={(t) => setTempPacingAmount(t.replace(/\D/g, ''))}
+                    keyboardType="number-pad"
+                    placeholder="Contoh: 50.000"
+                    placeholderTextColor={colors.inkTertiary}
+                    style={styles.pacingAmountInput}
+                  />
+                  <Text style={styles.pacingAmountUnit}>/hari</Text>
+                </View>
+
+                {/* Quick suggestions chips */}
+                <View style={styles.pacingChipsRow}>
+                  {[25000, 50000, 75000, 100000].map((amt) => (
+                    <Pressable
+                      key={amt}
+                      onPress={() => setTempPacingAmount(String(amt))}
+                      style={styles.pacingChipBtn}
+                    >
+                      <Text style={styles.pacingChipText}>{formatRupiah(amt)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.dialogBtnRow}>
+              <Pressable onPress={() => setShowPacingModal(false)} style={styles.dialogCancelBtn}>
+                <Text style={styles.dialogCancelBtnText}>Batal</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const cleanAmt = Number(tempPacingAmount.replace(/\D/g, ''));
+                  setPacingConfig({
+                    mode: tempPacingMode,
+                    customDailyLimit: cleanAmt > 0 ? cleanAmt : 50000,
+                  });
+                  setShowPacingModal(false);
+                }}
+                style={styles.dialogSaveBtn}
+              >
+                <Text style={styles.dialogSaveBtnText}>Simpan Pacing</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -585,7 +915,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.lg,
-    paddingBottom: 56,
+    paddingBottom: 28,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,
   },
@@ -596,7 +926,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.xl,
     marginTop: spacing.xl,
-    marginBottom: -96,
+    marginBottom: -28,
     ...shadow,
   },
   walletBadgeRow: {
@@ -633,13 +963,367 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.xl },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.lg },
   summaryItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   summaryIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   summaryLabel: { fontSize: 12, color: colors.muted },
   summaryValue: { fontSize: 15, fontWeight: '700' },
   divider: { width: 1, height: 32, backgroundColor: colors.border, marginHorizontal: spacing.md },
-  chips: { paddingHorizontal: spacing.lg, paddingTop: 96 + spacing.lg, paddingBottom: spacing.sm },
+  netCashDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  netCashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  netCashLeft: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  netCashTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  netCashTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.inkSecondary,
+  },
+  netCashBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+  },
+  netCashBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  netCashSub: {
+    fontSize: 10,
+    color: colors.inkTertiary,
+    marginTop: 2,
+  },
+  netCashRight: {
+    alignItems: 'flex-end',
+  },
+  netCashVal: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  netProgressBarBg: {
+    height: 4,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.pill,
+    marginTop: spacing.xs,
+    overflow: 'hidden',
+  },
+  netProgressBarFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+  },
+  pacingCard: {
+    backgroundColor: colors.card,
+    marginHorizontal: spacing.lg,
+    marginTop: 10,
+    padding: spacing.md,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow,
+  },
+  pacingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  pacingHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  pacingSettingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.sky100,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  pacingSettingBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  pacingIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pacingTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  pacingBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  pacingBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  pacingBody: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 2,
+    marginBottom: spacing.xs,
+  },
+  pacingColLeft: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  pacingTargetVal: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.ink,
+  },
+  pacingTargetUnit: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.inkTertiary,
+  },
+  pacingSubText: {
+    fontSize: 10,
+    color: colors.inkTertiary,
+    marginTop: 2,
+  },
+  pacingColRight: {
+    alignItems: 'flex-end',
+  },
+  pacingTodayLabel: {
+    fontSize: 10,
+    color: colors.inkTertiary,
+    fontWeight: '600',
+  },
+  pacingTodayVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  pacingProgressBg: {
+    height: 5,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.pill,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  pacingProgressFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+  },
+  chips: { paddingHorizontal: spacing.lg, paddingTop: 8, paddingBottom: spacing.sm },
+
+  // Pacing Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  dialogCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.card,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  dialogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  dialogIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.sky100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.ink,
+  },
+  dialogSubtitle: {
+    fontSize: 11,
+    color: colors.inkSecondary,
+    marginTop: 1,
+  },
+  pacingModeOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  pacingModeOptionActive: {
+    backgroundColor: colors.sky100,
+    borderColor: colors.primary,
+  },
+  pacingRadioCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: colors.inkTertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  pacingRadioCircleActive: {
+    borderColor: colors.primary,
+  },
+  pacingRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  pacingModeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  pacingRecBadge: {
+    backgroundColor: colors.incomeTint,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+  },
+  pacingRecBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.income,
+  },
+  pacingModeDesc: {
+    fontSize: 11,
+    color: colors.inkSecondary,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  pacingInputBoxWrap: {
+    backgroundColor: colors.canvas,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pacingInputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.inkSecondary,
+    marginBottom: 6,
+  },
+  pacingAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    height: 44,
+  },
+  pacingAmountPrefix: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+    marginRight: 4,
+  },
+  pacingAmountInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.ink,
+    height: '100%',
+  },
+  pacingAmountUnit: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.inkTertiary,
+    marginLeft: 4,
+  },
+  pacingChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  pacingChipBtn: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.chip,
+  },
+  pacingChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  dialogBtnRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  dialogCancelBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: radius.control,
+    backgroundColor: colors.canvas,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogCancelBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.inkSecondary,
+  },
+  dialogSaveBtn: {
+    flex: 2,
+    height: 42,
+    borderRadius: radius.control,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogSaveBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.white,
+  },
 
   flowCard: {
     backgroundColor: colors.card,
