@@ -10,6 +10,17 @@
 
 Aplikasi pencatatan dan monitoring keuangan personal (*personal finance monitoring*) berbasis mobile yang dibangun menggunakan **React Native** dan **Expo SDK 58**. Aplikasi ini dirancang untuk memudahkan pengguna dalam mencatat pemasukan dan pengeluaran harian, mengelola anggaran bulanan per kategori, serta menganalisis kondisi finansial melalui grafik visual interaktif.
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/f0f661ce-e691-4dfd-99a7-e5c4accbc85c" width="180" />
+  &nbsp;
+  <img src="https://github.com/user-attachments/assets/509ff003-2145-4bb2-a0d8-f985739d4667" width="180" />
+  &nbsp;
+  <img src="https://github.com/user-attachments/assets/f2db707a-ef81-4f7b-813f-00b9b9892dde" width="180" />
+  &nbsp;
+  <img src="https://github.com/user-attachments/assets/108ef6aa-aa00-4a4f-ac93-ffdb6fbb6c49" width="180" />
+  &nbsp;
+  <img src="https://github.com/user-attachments/assets/da8a39f2-b457-46fc-ba0a-636ea64dc7d1" width="180" />
+</p>
 ---
 
 ## Badges
