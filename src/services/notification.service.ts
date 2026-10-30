@@ -1,6 +1,7 @@
 import { Alert, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { formatRupiah, toYMD } from '../utils/format';
+import { PacingService } from './pacing.service';
 
 // Configure how notifications appear when app is in foreground
 Notifications.setNotificationHandler({
@@ -208,7 +209,7 @@ export const NotificationService = {
   /**
    * 2. Evaluate if wallet real cash balance is critically low or in deficit
    * Triggers when:
-   * - Balance is negative (defisit)
+   * - Balance is negative (minus)
    * - Balance is <= Rp 50.000 or <= 15% of cumulative income
    */
   checkLowBalanceAlert: async (params: LowBalanceAlertCheckParams): Promise<'deficit' | 'low' | null> => {
@@ -227,8 +228,8 @@ export const NotificationService = {
         firedAlerts.add(keyLow);
 
         await NotificationService.sendLocalNotification(
-          `🚨 Saldo Defisit: Dompet ${categoryName}`,
-          `Saldo kas telah minus (${formatRupiah(realBalance)}). Segera lakukan transfer saldo atau tambah pemasukan ke dompet ini.`,
+          `🚨 Saldo Minus: Dompet ${categoryName}`,
+          `Saldo kas sudah minus (${formatRupiah(realBalance)}). Segera isi ulang atau transfer saldo ke dompet ini.`,
           { categoryId, type: 'WALLET_DEFICIT' },
         );
         return 'deficit';
@@ -278,7 +279,11 @@ export const NotificationService = {
 
     // Days in current month (e.g. 28, 29, 30, 31)
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const dailyQuota = Math.round(budgetAmount / daysInMonth);
+    const pacingCfg = PacingService.getConfig();
+    const dailyQuota =
+      pacingCfg.mode === 'CUSTOM' && pacingCfg.customDailyLimit > 0
+        ? pacingCfg.customDailyLimit
+        : Math.round(budgetAmount / daysInMonth);
 
     if (dailyQuota <= 0) return false;
 
