@@ -655,7 +655,7 @@ export default function CategoryDetailScreen() {
                 <View style={styles.statColumn}>
                   <Text style={styles.statLabel}>Saldo Riil Kas</Text>
                   <Text style={[styles.statValue, { color: realBalance >= 0 ? colors.ink : colors.expense }]}>
-                    {realBalance >= 0 ? formatRupiah(realBalance) : `Defisit ${formatRupiah(Math.abs(realBalance))}`}
+                    {realBalance >= 0 ? formatRupiah(realBalance) : `Minus ${formatRupiah(Math.abs(realBalance))}`}
                   </Text>
                   <Text style={styles.statSub}>
                     {cumulativeIncome > 0 ? `+${formatRupiah(cumulativeIncome)} total masuk` : 'Belum ada top-up'}
