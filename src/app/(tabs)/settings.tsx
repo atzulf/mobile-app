@@ -18,8 +18,9 @@ import { Transaction, TransactionService } from '../../services/transaction.serv
 import { Budget, BudgetService } from '../../services/budget.service';
 import { NotificationService } from '../../services/notification.service';
 import { useUserName } from '../../services/profile.service';
+import { usePacingConfig } from '../../services/pacing.service';
 import { colors, getCategoryIcon, radius, spacing, shadow } from '../../theme';
-import { confirmAction, getErrorMessage, getMonthRange } from '../../utils/format';
+import { confirmAction, formatRupiah, formatThousands, getErrorMessage, getMonthRange } from '../../utils/format';
 import { ErrorState, Loading, EmptyState } from '../../components/ui/common';
 
 const AVAILABLE_ICONS = [
@@ -49,6 +50,12 @@ export default function SettingsScreen() {
 
   // Preferences States
   const [startOfWeek, setStartOfWeek] = useState<'Senin' | 'Minggu'>('Senin');
+
+  // Pacing Settings State
+  const [pacingConfig, setPacingConfig] = usePacingConfig();
+  const [pacingModalVisible, setPacingModalVisible] = useState(false);
+  const [tempPacingMode, setTempPacingMode] = useState<'AUTO' | 'CUSTOM'>(pacingConfig.mode);
+  const [tempPacingAmount, setTempPacingAmount] = useState(String(pacingConfig.customDailyLimit));
 
   // Category Add / Edit Modal State
   const [showCatModal, setShowCatModal] = useState(false);
@@ -295,18 +302,32 @@ export default function SettingsScreen() {
 
           <View style={styles.settingItemDivider} />
 
-          {/* Item 3: Batas Belanja Harian */}
+          {/* Item 3: Batas Belanja Harian (Pacing) */}
           <View style={styles.settingItemRow}>
             <View style={styles.settingIconWrap}>
-              <Ionicons name="flash-outline" size={18} color={colors.blue500} />
+              <Ionicons name="speedometer-outline" size={18} color={colors.blue500} />
             </View>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, marginRight: spacing.xs }}>
               <Text style={styles.settingItemTitle}>Batas Belanja Harian</Text>
-              <Text style={styles.settingItemSubtitle}>Deteksi belanja hari ini melebihi rekomendasi harian</Text>
+              <Text style={styles.settingItemSubtitle}>
+                {pacingConfig.mode === 'CUSTOM'
+                  ? `Mode Kustom: ${formatRupiah(pacingConfig.customDailyLimit)}/hari`
+                  : 'Mode Otomatis: Dihitung dari sisa plafon'}
+              </Text>
             </View>
-            <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>Aktif</Text>
-            </View>
+            <Pressable
+              onPress={() => {
+                setTempPacingMode(pacingConfig.mode);
+                setTempPacingAmount(String(pacingConfig.customDailyLimit));
+                setPacingModalVisible(true);
+              }}
+              style={styles.settingPillBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Atur batas belanja harian"
+            >
+              <Ionicons name="options-outline" size={13} color={colors.primary} />
+              <Text style={styles.settingPillBtnText}>Atur</Text>
+            </Pressable>
           </View>
 
           <View style={styles.settingItemDivider} />
@@ -394,6 +415,120 @@ export default function SettingsScreen() {
               </Pressable>
               <Pressable onPress={handleSaveName} style={styles.dialogSaveBtn}>
                 <Text style={styles.dialogSaveBtnText}>Simpan Nama</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modal: Atur Pacing Belanja Harian */}
+      <Modal visible={pacingModalVisible} transparent animationType="fade" onRequestClose={() => setPacingModalVisible(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.dialogCard}>
+            <View style={styles.dialogHeader}>
+              <View style={styles.dialogIconWrap}>
+                <Ionicons name="speedometer-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dialogTitle}>Batas Belanja Harian</Text>
+                <Text style={styles.dialogSubtitle}>Tentukan batas rekomendasi belanja harianmu</Text>
+              </View>
+              <Pressable onPress={() => setPacingModalVisible(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.ink} />
+              </Pressable>
+            </View>
+
+            {/* Opsi 1: Otomatis */}
+            <Pressable
+              onPress={() => setTempPacingMode('AUTO')}
+              style={[
+                styles.pacingModeOption,
+                tempPacingMode === 'AUTO' && styles.pacingModeOptionActive,
+              ]}
+            >
+              <View style={[styles.pacingRadioCircle, tempPacingMode === 'AUTO' && styles.pacingRadioCircleActive]}>
+                {tempPacingMode === 'AUTO' && <View style={styles.pacingRadioInner} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.pacingModeTitle}>Otomatis (Berdasarkan Plafon)</Text>
+                  <View style={styles.pacingRecBadge}>
+                    <Text style={styles.pacingRecBadgeText}>Rekomendasi</Text>
+                  </View>
+                </View>
+                <Text style={styles.pacingModeDesc}>
+                  Dihitung dinamis: Sisa plafon dibagi sisa hari di bulan ini.
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Opsi 2: Kustom Manual */}
+            <Pressable
+              onPress={() => setTempPacingMode('CUSTOM')}
+              style={[
+                styles.pacingModeOption,
+                tempPacingMode === 'CUSTOM' && styles.pacingModeOptionActive,
+              ]}
+            >
+              <View style={[styles.pacingRadioCircle, tempPacingMode === 'CUSTOM' && styles.pacingRadioCircleActive]}>
+                {tempPacingMode === 'CUSTOM' && <View style={styles.pacingRadioInner} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pacingModeTitle}>Kustom (Nominal Tetap Manual)</Text>
+                <Text style={styles.pacingModeDesc}>
+                  Tetapkan target batas belanja harian tetap sesuai kehendak Anda.
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Input Nominal bila Mode Kustom dipilih */}
+            {tempPacingMode === 'CUSTOM' && (
+              <View style={styles.pacingInputBoxWrap}>
+                <Text style={styles.pacingInputLabel}>Nominal Batas Belanja Harian</Text>
+                <View style={styles.pacingAmountRow}>
+                  <Text style={styles.pacingAmountPrefix}>Rp</Text>
+                  <TextInput
+                    value={formatThousands(tempPacingAmount)}
+                    onChangeText={(t) => setTempPacingAmount(t.replace(/\D/g, ''))}
+                    keyboardType="number-pad"
+                    placeholder="Contoh: 50.000"
+                    placeholderTextColor={colors.inkTertiary}
+                    style={styles.pacingAmountInput}
+                  />
+                  <Text style={styles.pacingAmountUnit}>/hari</Text>
+                </View>
+
+                {/* Quick suggestions chips */}
+                <View style={styles.pacingChipsRow}>
+                  {[25000, 50000, 75000, 100000].map((amt) => (
+                    <Pressable
+                      key={amt}
+                      onPress={() => setTempPacingAmount(String(amt))}
+                      style={styles.pacingChipBtn}
+                    >
+                      <Text style={styles.pacingChipText}>{formatRupiah(amt)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.dialogBtnRow}>
+              <Pressable onPress={() => setPacingModalVisible(false)} style={styles.dialogCancelBtn}>
+                <Text style={styles.dialogCancelBtnText}>Batal</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const cleanAmt = Number(tempPacingAmount.replace(/\D/g, ''));
+                  setPacingConfig({
+                    mode: tempPacingMode,
+                    customDailyLimit: cleanAmt > 0 ? cleanAmt : 50000,
+                  });
+                  setPacingModalVisible(false);
+                }}
+                style={styles.dialogSaveBtn}
+              >
+                <Text style={styles.dialogSaveBtnText}>Simpan Pacing</Text>
               </Pressable>
             </View>
           </View>
@@ -819,6 +954,138 @@ const styles = StyleSheet.create({
   testChipText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  settingPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.sky100,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.chip,
+  },
+  settingPillBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  pacingModeOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  pacingModeOptionActive: {
+    backgroundColor: colors.sky100,
+    borderColor: colors.primary,
+  },
+  pacingRadioCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: colors.inkTertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  pacingRadioCircleActive: {
+    borderColor: colors.primary,
+  },
+  pacingRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  pacingModeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  pacingRecBadge: {
+    backgroundColor: colors.incomeTint,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+  },
+  pacingRecBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.income,
+  },
+  pacingModeDesc: {
+    fontSize: 11,
+    color: colors.inkSecondary,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  pacingInputBoxWrap: {
+    backgroundColor: colors.canvas,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pacingInputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.inkSecondary,
+    marginBottom: 6,
+  },
+  pacingAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    height: 44,
+  },
+  pacingAmountPrefix: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+    marginRight: 4,
+  },
+  pacingAmountInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.ink,
+    height: '100%',
+  },
+  pacingAmountUnit: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.inkTertiary,
+    marginLeft: 4,
+  },
+  pacingChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  pacingChipBtn: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.chip,
+  },
+  pacingChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.ink,
   },
 
   // Dialog / Edit Name Modal
